@@ -1,5 +1,5 @@
-import { spawn, type ChildProcess } from "node:child_process";
 import { Worker } from "node:worker_threads";
+import { systemPlayer, type AudioPlayer, type Playback } from "./players.js";
 import type { Speaker, Utterance } from "./speaker.js";
 
 interface Audio {
@@ -14,12 +14,14 @@ export const LINE_PAUSE = 0.5;
 export interface KokoroOptions {
   /** Told once, when speech can't work (no model, no audio player); after that the speaker stays silent. */
   onError?: (err: Error) => void;
+  /** What plays the audio; by default, whatever this system has (see systemPlayer). */
+  player?: AudioPlayer;
 }
 
 /**
  * Local text-to-speech with Kokoro (an 80 MB ONNX model, run on the CPU so the GPU stays with the LLM, in a
- * worker thread so the TUI stays responsive), played through PulseAudio's `paplay`, which WSLg routes to
- * Windows. Each line is generated while the one before it plays, so long narration starts after its first
+ * worker thread so the TUI stays responsive), played through the system's own player (see players.ts).
+ * Each line is generated while the one before it plays, so long narration starts after its first
  * sentence.
  */
 export class KokoroSpeaker implements Speaker {
@@ -31,7 +33,8 @@ export class KokoroSpeaker implements Speaker {
   /** Bumped by stop(), so audio generated for what was stopped is thrown away. */
   private generation = 0;
   private running = false;
-  private player?: ChildProcess;
+  private readonly player: AudioPlayer;
+  private playing?: Playback;
   private broken = false;
 
   /** False once speech has failed for good (see onError). */
@@ -39,8 +42,9 @@ export class KokoroSpeaker implements Speaker {
     return !this.broken;
   }
 
-  constructor({ onError = () => {} }: KokoroOptions = {}) {
+  constructor({ onError = () => {}, player = systemPlayer() }: KokoroOptions = {}) {
     this.onError = onError;
+    this.player = player;
   }
 
   async warmUp(): Promise<void> {
@@ -56,13 +60,14 @@ export class KokoroSpeaker implements Speaker {
   stop(): void {
     this.generation++;
     this.queue = [];
-    this.player?.kill();
+    this.playing?.stop();
     // Lines already sent to the worker but not yet started are dropped there too.
     void this.worker?.then((worker) => worker.postMessage({ stop: this.generation })).catch(() => {});
   }
 
   async close(): Promise<void> {
     this.stop();
+    this.player.close();
     if (this.worker) await (await this.worker.catch(() => undefined))?.terminate();
   }
 
@@ -125,19 +130,8 @@ export class KokoroSpeaker implements Speaker {
     // The pause is played as silence after the speech, so it's part of the line and Tab skips it too.
     const samples = new Float32Array(speech.length + Math.round(rate * pause));
     samples.set(speech);
-    return new Promise((resolve) => {
-      const player = spawn("paplay", ["--raw", "--format=float32le", `--rate=${rate}`, "--channels=1"], {
-        stdio: ["pipe", "ignore", "ignore"],
-      });
-      this.player = player;
-      player.on("error", (err) => {
-        this.fail(err);
-        resolve();
-      });
-      player.on("close", () => resolve());
-      player.stdin?.on("error", () => {}); // killed mid-line by stop()
-      player.stdin?.end(Buffer.from(samples.buffer, samples.byteOffset, samples.byteLength));
-    });
+    this.playing = this.player.play(samples, rate);
+    return this.playing.done.catch((err: unknown) => this.fail(err));
   }
 
   private fail(err: unknown): void {

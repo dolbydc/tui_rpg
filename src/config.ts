@@ -1,4 +1,5 @@
 import path from "node:path";
+import { PLAYERS, type PlayerName } from "./voice/players.js";
 
 export const DEFAULT_CAMPAIGN_DIR = path.resolve(import.meta.dirname, "../content/hollow-lantern");
 export const DEFAULT_SQLITE_FILE = path.resolve(import.meta.dirname, "../data/tui_rpg.db");
@@ -14,6 +15,8 @@ export interface Config {
   ollamaModel: string;
   /** Read narration and dialogue aloud (local Kokoro text-to-speech). */
   voice: "on" | "off";
+  /** What plays the audio, when the one picked for this system isn't wanted. */
+  player?: PlayerName;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -26,6 +29,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ollamaUrl: env.OLLAMA_URL ?? "http://localhost:11434",
     ollamaModel: env.OLLAMA_MODEL ?? "gemma4:12b",
     voice: oneOf(env.TUI_RPG_VOICE, ["on", "off"], "TUI_RPG_VOICE"),
+    player: env.TUI_RPG_PLAYER === undefined ? undefined : oneOf(env.TUI_RPG_PLAYER, PLAYERS, "TUI_RPG_PLAYER"),
   };
 }
 
