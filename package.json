@@ -8,18 +8,23 @@
   },
   "scripts": {
     "dev": "tsx src/index.tsx",
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test \"src/**/*.test.{ts,tsx}\""
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
+    "better-sqlite3": "^12.11.1",
     "ink": "^8.0.0",
-    "react": "^19.3.0"
+    "kokoro-js": "^1.2.1",
+    "react": "^19.3.0",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.6.4",
     "@types/react": "^19.3.0",
     "tsx": "^4.23.15",
