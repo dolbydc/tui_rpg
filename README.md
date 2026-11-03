@@ -84,8 +84,19 @@ and NPCs are always told the day, the part of the day and the time; the sidebar 
 Complications from partial successes come due 20–50 in-game minutes later.
 
 **Reading aloud.** Narration and dialogue are spoken with [Kokoro](https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX)
-(`kokoro-js`), a local text-to-speech model run on the CPU in a worker thread, played through
-PulseAudio's `paplay` (WSLg routes it to Windows). The model (~330 MB, fp32) downloads on first use.
+(`kokoro-js`), a local text-to-speech model run on the CPU in a worker thread. It runs on macOS
+(Intel and Apple Silicon), Linux and Windows (x64 and ARM64): the ONNX runtime ships for each, and
+the phonemizer is WebAssembly. The model (~330 MB, fp32) downloads on first use. Audio plays through
+what the system already has (`src/voice/players.ts`):
+
+| System | Player |
+| --- | --- |
+| macOS | `afplay` (built in) |
+| Windows (native) | PowerShell's `SoundPlayer` (built in); one PowerShell is kept started ahead so lines don't wait on it |
+| Linux, WSL | the first installed of `paplay` (PulseAudio, or PipeWire's PulseAudio service; under WSL, WSLg routes it to Windows), `pw-play` (PipeWire), `aplay` (ALSA) |
+
+`TUI_RPG_PLAYER` picks one outright. The same checkout can't be shared between WSL and native
+Windows: `better-sqlite3` is built for the system that ran `npm install`, so install on each.
 The narrator has one voice (`narrator_voice` in `world.md`); each NPC speaks in theirs (`voice` in
 their file, else one picked from their pronouns), and their `*actions*` are read by the narrator.
 Your own input and system notes aren't read. Speech starts about 1.5 s after a reply appears; Tab
@@ -122,6 +133,7 @@ a box's border marks stairs up or down.
 | `TUI_RPG_CAMPAIGN_DIR` | `content/hollow-lantern` | campaign content to load |
 | `TUI_RPG_CAMPAIGN_ID` | `default` | save slot |
 | `TUI_RPG_VOICE` | `on` | `off` starts with reading aloud off (`/voice on` turns it on) |
+| `TUI_RPG_PLAYER` | per system | `paplay`, `pw-play`, `aplay`, `afplay` or `powershell`: what plays the audio |
 
 ## Architecture
 

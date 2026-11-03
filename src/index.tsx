@@ -12,6 +12,7 @@ import { SqliteStore } from "./storage/sqlite.js";
 import type { CampaignStore } from "./storage/store.js";
 import { App } from "./tui/app.js";
 import { KokoroSpeaker } from "./voice/kokoro.js";
+import { systemPlayer } from "./voice/players.js";
 import { VoiceOver } from "./voice/voice-over.js";
 import { WorldEngine } from "./world/engine.js";
 import { loadWorld } from "./world/loader.js";
@@ -42,7 +43,10 @@ async function main() {
 
   // Reading aloud: the speech model loads in the background too (or on /voice on, if it starts off). If it
   // can't work, the player is told once and it goes quiet.
-  const speaker = new KokoroSpeaker({ onError: (err) => voice.report(`Reading aloud is off: ${err.message}`) });
+  const speaker = new KokoroSpeaker({
+    onError: (err) => voice.report(`Reading aloud is off: ${err.message}`),
+    player: systemPlayer(process.platform, config.player),
+  });
   const voice = new VoiceOver(speaker, world.world, config.voice === "on");
   if (config.voice === "on") void speaker.warmUp().catch(() => {});
 
