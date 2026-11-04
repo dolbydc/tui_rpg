@@ -281,13 +281,13 @@ test("going down to the cellar shows only the cellar's level, and coming back up
   assert.deepEqual([session.map.level, ids()], [0, ["village-square", "hollow-lantern-inn"]]);
 });
 
-test("/new makes a character, then restarts the campaign with them", async () => {
+test("/new goes to the menu; a new character there restarts the campaign with them", async () => {
   const { session, store } = setup();
   await session.start();
   await session.submit("/go east");
 
-  const prompt = await session.submit("/new");
-  assert.match(prompt.lines.at(-1)!.text, /name\?/);
+  assert.deepEqual(await session.submit("/new"), { lines: [], menu: true });
+  assert.match(session.newCharacter().at(-1)!.text, /name\?/);
   await session.submit("Ash Thorne");
   await session.submit("she");
   assert.match((await session.submit("might 6 wits 2 grace 1 charisma 2")).lines[0].text, /That's 11 points/);
@@ -311,11 +311,28 @@ test("/cancel abandons a new character and keeps the current game", async () => 
   const { session } = setup();
   await session.start();
   await session.submit("/go east");
-  await session.submit("/new");
+  session.newCharacter();
   await session.submit("Ash");
   assert.equal((await session.submit("/cancel")).lines[0].text, "Back to your game.");
   assert.equal(session.scene.character.name, "Wren");
   assert.equal(session.scene.location.id, "forest-edge");
+});
+
+test("a first character can be made before there's any game; giving up on it goes back to the menu", async () => {
+  const { session, store } = setup();
+  assert.equal(await session.resume(), undefined);
+  assert.equal(session.playing, false);
+  session.newCharacter();
+  await session.submit("Ash");
+  assert.deepEqual(await session.submit("/cancel"), { lines: [], menu: true });
+  assert.deepEqual(await session.submit("look around"), { lines: [], menu: true });
+
+  session.newCharacter();
+  for (const answer of ["Ash", "they", "3 3 2 2"]) await session.submit(answer);
+  const begun = await session.submit("yes");
+  assert.equal(begun.reset, true);
+  assert.equal(session.playing, true);
+  assert.equal((await store.load("test"))?.state.character.name, "Ash");
 });
 
 test("a quest completes when its definition of done holds, and pays out its reward", async () => {
@@ -330,7 +347,7 @@ test("a quest completes when its definition of done holds, and pays out its rewa
 
   const gave = await session.submit("/give key to the innkeeper");
   assert.deepEqual(gave.lines.map((l) => l.text), [
-    "You give the innkeeper an iron key.",
+    "You give the innkeeper a lantern-key.",
     "Quest complete: The Missing Lantern. Reward: 100 XP, 5 silver pennies.",
     "You have enough experience to reach level 2: /levelup <stat>.",
   ]);
@@ -456,9 +473,9 @@ test("asking to take several things takes one, and says so", async () => {
   const taken = await session.submit("/take hook and key");
   assert.deepEqual(taken.lines.map((l) => l.text), [
     "You take the hook on a stick.",
-    "(You can only pick up one thing at a time. The iron key is still here.)",
+    "(You can only pick up one thing at a time. The lantern-key is still here.)",
   ]);
-  assert.ok(!session.scene.character.inventory.includes("an iron key"));
+  assert.ok(!session.scene.character.inventory.includes("lantern-key"));
   assert.equal(session.status.actionsLeft, 2);
 });
 
@@ -502,7 +519,7 @@ test("an older save gets the hidden items it never had, without hiding what the 
     const state = world.newGame("test");
     const { hiddenItems: _, ...old } = state;
     delete old.locationItems["inn-cellar"];
-    old.locationItems["forest-depths-1"].push("an iron key");
+    old.locationItems["forest-depths-1"].push("lantern-key");
     await store.commitTurn({ ...old, visited } as typeof state, { turn: 1, input: "", events: [], output: [] });
     const session = setup(undefined, store).session;
     await session.start();
@@ -518,10 +535,10 @@ test("an older save gets the hidden items it never had, without hiding what the 
   assert.match((await fresh.submit("/search")).lines[0].text, /You search, and find a ledger book/);
   // Wren never went to the Depths, so the key there is hidden again.
   const depths = (state: GameState) => [
-    state.locationItems["forest-depths-1"].includes("an iron key"),
+    state.locationItems["forest-depths-1"].includes("lantern-key"),
     state.hiddenItems["forest-depths-1"],
   ];
-  assert.deepEqual(depths(before), [false, ["an iron key"]]);
+  assert.deepEqual(depths(before), [false, ["lantern-key"]]);
 
   // Had Wren been there and seen it, it stays in sight.
   const seen = await oldSave(["village-square", "forest-edge", "forest-depths-1"]);

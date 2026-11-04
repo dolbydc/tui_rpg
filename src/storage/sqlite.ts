@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import type { GameState, NpcMemory, TurnRecord } from "../domain/types.js";
-import type { CampaignStore, SavedCampaign } from "./store.js";
+import type { CampaignStore, SavedCampaign, SaveSummary } from "./store.js";
 
 // JSON is stored as text, timestamps as ISO 8601 text, and `seq` (insertion order) is the integer primary
 // key, so it numbers itself.
@@ -89,6 +89,31 @@ export class SqliteStore implements CampaignStore {
 
   async reset(campaignId: string): Promise<void> {
     this.db.prepare("delete from campaigns where id = ?").run(campaignId);
+  }
+
+  async saves(): Promise<SaveSummary[]> {
+    const rows = this.db
+      .prepare<[], { id: string; state: string; updated_at: string }>("select id, state, updated_at from campaigns order by updated_at desc")
+      .all();
+    return rows.map((row) => {
+      const state = JSON.parse(row.state) as GameState;
+      return { campaignId: row.id, characterName: state.character.name, turn: state.turn, updatedAt: row.updated_at };
+    });
+  }
+
+  async rename(from: string, to: string): Promise<void> {
+    this.db.transaction(() => {
+      const row = this.db
+        .prepare<[string], { state: string; updated_at: string }>("select state, updated_at from campaigns where id = ?")
+        .get(from);
+      if (!row || this.db.prepare("select 1 from campaigns where id = ?").get(to)) return;
+      // The history points at the campaign, so the new row goes in first and the old one comes out last.
+      const state = { ...(JSON.parse(row.state) as GameState), campaignId: to };
+      this.db.prepare("insert into campaigns (id, state, updated_at) values (?, ?, ?)").run(to, JSON.stringify(state), row.updated_at);
+      this.db.prepare("update turns set campaign_id = ? where campaign_id = ?").run(to, from);
+      this.db.prepare("update npc_memories set campaign_id = ? where campaign_id = ?").run(to, from);
+      this.db.prepare("delete from campaigns where id = ?").run(from);
+    })();
   }
 
   async close(): Promise<void> {

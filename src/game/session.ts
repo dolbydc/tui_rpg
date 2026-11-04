@@ -42,9 +42,13 @@ export interface TurnResult {
   lines: LogLine[];
   /** The campaign restarted; the UI should replace its log with these lines. */
   reset?: boolean;
+  /** Back to the start menu (/new, or giving up on a character before there's a game to go back to). */
+  menu?: boolean;
   quit?: boolean;
   /** Turn reading aloud on or off (undefined: toggle). Set by /voice; the UI owns the speaker. */
   voice?: { on?: boolean };
+  /** Turn the music on or off (undefined: toggle). Set by /music. */
+  music?: { on?: boolean };
 }
 
 /** Where the player is in the turn, and how far from the next level, for the character sheet. */
@@ -64,7 +68,8 @@ const RECENT_LINES = 12;
 /** Orchestrates a play session: commands, the turn pipeline, and save/load. The UI only talks to this. */
 export class SessionController {
   private readonly deps: SessionDeps;
-  private state!: GameState;
+  /** Undefined until a game is resumed or begun: while the first character is being made, say. */
+  private state?: GameState;
   private recent: LogLine[] = [];
   /** Every NPC's memories for this campaign, oldest first. */
   private memories: NpcMemory[] = [];
@@ -82,30 +87,64 @@ export class SessionController {
     return this.deps.world.world.title;
   }
 
+  private get game(): GameState {
+    if (!this.state) throw new Error("No game in progress");
+    return this.state;
+  }
+
+  /** Whether there's a game in progress (not just a character being made for the first one). */
+  get playing(): boolean {
+    return this.state !== undefined;
+  }
+
   get scene(): SceneView {
-    return this.deps.world.scene(this.state);
+    return this.deps.world.scene(this.game);
+  }
+
+  /** The mood music where the player is (the location's own, or the world's); undefined for silence. */
+  get music(): string | undefined {
+    const { world } = this.deps.world;
+    const here = this.state && world.locations.get(this.state.locationId);
+    return (here?.music === undefined ? world.music : here.music) ?? undefined;
   }
 
   get map(): MapView {
-    return this.deps.world.mapView(this.state);
+    return this.deps.world.mapView(this.game);
   }
 
   get status(): PlayerStatus {
+    const state = this.game;
     return {
-      turn: this.state.turn,
-      actionsLeft: this.state.actionsLeft,
+      turn: state.turn,
+      actionsLeft: state.actionsLeft,
       actionsPerTurn: ACTIONS_PER_TURN,
-      nextLevelXp: levelUpCost(this.state.character.level),
-      drive: this.state.drive,
+      nextLevelXp: levelUpCost(state.character.level),
+      drive: state.drive,
       drivePerQuest: DRIVE_PER_QUEST,
-      time: this.deps.world.time(this.state),
+      time: this.deps.world.time(state),
     };
   }
 
-  /** Resumes the saved campaign, or starts a new one. Returns the lines to show first. */
+  /** Resumes the saved campaign, or starts a new one with the campaign's own character. */
   async start(): Promise<LogLine[]> {
+    return (await this.resume()) ?? this.begin();
+  }
+
+  /** Makes a character for a new game of this campaign: the lines to show, then each answer goes to submit(). */
+  newCharacter(): LogLine[] {
+    const { creation, lines } = startCreation();
+    this.creation = creation;
+    return lines;
+  }
+
+  /**
+   * Loads the saved game, if there is one, and returns the lines to show first (its recent history).
+   * Everything is saved as it happens, so this is also how to come back to it from the menu.
+   */
+  async resume(): Promise<LogLine[] | undefined> {
+    this.creation = undefined;
     const saved = await this.deps.store.load(this.deps.campaignId);
-    if (!saved) return this.begin();
+    if (!saved) return undefined;
     // Older saves predate pronouns, gifts, learning names, paused routines, the map, actions, levels,
     // rolls and newer stats.
     const { state } = saved;
@@ -153,6 +192,7 @@ export class SessionController {
 
     const command = parseCommand(input);
     if (this.creation) return this.create(input, command?.kind);
+    if (!this.state) return { lines: [], menu: true };
     switch (command?.kind) {
       case "help":
         return { lines: [{ kind: "system", text: HELP }] };
@@ -164,15 +204,14 @@ export class SessionController {
         return { lines: this.recall(command.npc) };
       case "levelup":
         return { lines: await this.levelUp(command.stat) };
-      case "new": {
-        const { creation, lines } = startCreation();
-        this.creation = creation;
-        return { lines };
-      }
+      case "new":
+        return { lines: [], menu: true };
       case "cancel":
         return { lines: [{ kind: "system", text: "Nothing to cancel." }] };
       case "voice":
         return { lines: [], voice: { on: command.on } };
+      case "music":
+        return { lines: [], music: { on: command.on } };
     }
 
     try {
@@ -192,28 +231,29 @@ export class SessionController {
    */
   private async playTurn(input: string, commandIntent: Intent | undefined, push = false): Promise<LogLine[]> {
     const { world, narrative, store } = this.deps;
+    const state = this.game;
 
     // 1. Interpret: explicit commands skip the LLM. Mid-conversation, unaddressed lines go to the partner.
     //    /push marks the attempt as pushed, if it turns out to need a roll at all.
     const current = this.scene;
-    const partner = current.npcs.find((n) => n.id === this.state.conversation?.npcId);
+    const partner = current.npcs.find((n) => n.id === state.conversation?.npcId);
     const interpreted = commandIntent ?? (await narrative.interpret(input, current, partner));
     const intent: Intent =
       push && interpreted.check ? { ...interpreted, check: { ...interpreted.check, push: true } } : interpreted;
-    const drive = driveNote(push || Boolean(intent.check?.push), intent, this.state.drive);
+    const drive = driveNote(push || Boolean(intent.check?.push), intent, state.drive);
 
     // 2. Resolve against the rules. An impossible intent costs no action and leaves no record.
-    const resolution = world.resolve(intent, this.state);
+    const resolution = world.resolve(intent, state);
     if (!resolution.ok) return [{ kind: "system", text: resolution.reason }];
 
     // 2b. Roll: a risky attempt, or arriving somewhere that calls for it, is checked against a stat. Only the
     //     narrator learns how it went; the player sees the story, never the dice.
-    const resolved = { ...resolution, events: [...resolution.events, ...world.check(intent, resolution, this.state, input)] };
+    const resolved = { ...resolution, events: [...resolution.events, ...world.check(intent, resolution, state, input)] };
 
     // 3. Apply state changes and spend the action, ending the turn if it was the last. An NPC the player is
     //    talking with holds their routine.
-    let next = world.act(this.state, intent, resolved);
-    const turnEnded = next.turn !== this.state.turn;
+    let next = world.act(state, intent, resolved);
+    const turnEnded = next.turn !== state.turn;
 
     // 3b. Quests: any whose definition of done now holds are completed and pay out their rewards; then any
     //     that can now start (perhaps because another finished) begin, restoring drive.
@@ -237,9 +277,9 @@ export class SessionController {
             recent: this.recent,
             memories: npc && recall(npc.id, this.memories),
             player: npc && {
-              name: knowsPlayerName(npc.id, this.memories) ? this.state.character.name : undefined,
-              given: this.state.npcItems[npc.id] ?? [],
-              knowsYourName: this.state.knownNpcs.includes(npc.id),
+              name: knowsPlayerName(npc.id, this.memories) ? state.character.name : undefined,
+              given: state.npcItems[npc.id] ?? [],
+              knowsYourName: state.knownNpcs.includes(npc.id),
             },
           });
 
@@ -251,7 +291,7 @@ export class SessionController {
 
     // 6. Observe: NPCs who were there remember what they noticed, depending on their perception.
     const witnessed = observe(world, {
-      before: this.state,
+      before: state,
       after: next,
       intent,
       events: resolution.events,
@@ -274,7 +314,7 @@ export class SessionController {
 
     // 8. Present: NPCs whose routines bring them into or out of view are announced, so nobody appears from
     //    nowhere, and everyone is shown as the player knows them.
-    const movements = describeMovements(world.npcMovements(this.state, next), (id) => world.location(id), next.knownNpcs);
+    const movements = describeMovements(world.npcMovements(state, next), (id) => world.location(id), next.knownNpcs);
     const pushed = resolved.events.some((e) => e.type === "checked" && e.check.pushed);
     const lines = [
       ...(drive ? [drive] : []),
@@ -333,12 +373,11 @@ export class SessionController {
     if (command === "quit") return { lines: [], quit: true };
     if (command === "cancel") {
       this.creation = undefined;
-      return { lines: [{ kind: "system", text: "Back to your game." }] };
+      return this.state ? { lines: [{ kind: "system", text: "Back to your game." }] } : { lines: [], menu: true };
     }
     if (command === "new") {
-      const { creation, lines } = startCreation();
-      this.creation = creation;
-      return { lines };
+      this.creation = undefined;
+      return { lines: [], menu: true };
     }
     if (command) return { lines: [{ kind: "system", text: "Finish making your character first, or /cancel." }] };
     const step = advanceCreation(this.creation!, input, this.deps.world.world.start.character);
@@ -372,7 +411,8 @@ export class SessionController {
 
   /** Spends experience on a level. Costs no action, so it isn't a turn: nobody sees or narrates it. */
   private async levelUp(stat: string | undefined): Promise<LogLine[]> {
-    const { character } = this.state;
+    const state = this.game;
+    const { character } = state;
     if (!stat) {
       const cost = levelUpCost(character.level);
       return [
@@ -382,9 +422,9 @@ export class SessionController {
         },
       ];
     }
-    const resolution = this.deps.world.levelUp(this.state, stat);
+    const resolution = this.deps.world.levelUp(state, stat);
     if (!resolution.ok) return [{ kind: "system", text: resolution.reason }];
-    const next = this.deps.world.apply(this.state, resolution.events);
+    const next = this.deps.world.apply(state, resolution.events);
     const [event] = resolution.events;
     const raised = event.type === "levelled_up" ? event.stat : stat;
     const lines: LogLine[] = [

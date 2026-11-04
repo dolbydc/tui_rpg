@@ -52,7 +52,8 @@ function npcVoice(npc: NpcDef): string {
 /** Reads the game's output aloud, unless switched off. */
 export class VoiceOver {
   private readonly speaker: Speaker;
-  private readonly world: Voiced;
+  /** The campaign being played, for its voices: see use(). */
+  private world: Voiced;
   enabled: boolean;
   /** Where problems with the speaker are shown; set by the UI. */
   onNotice: (text: string) => void = () => {};
@@ -61,6 +62,11 @@ export class VoiceOver {
     this.speaker = speaker;
     this.world = world;
     this.enabled = enabled;
+  }
+
+  /** Speaks with another campaign's voices from now on. */
+  use(world: Voiced): void {
+    this.world = world;
   }
 
   say(lines: LogLine[]): void {

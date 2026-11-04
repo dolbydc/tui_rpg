@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { DEFAULT_CAMPAIGN_DIR } from "../config.js";
 import { loadWorld } from "../world/loader.js";
-import { sentences } from "./kokoro.js";
+import { LINE_PAUSE, sentences, trimSilence } from "./kokoro.js";
 import type { Speaker, Utterance } from "./speaker.js";
 import { VoiceOver, voiceScript } from "./voice-over.js";
 
@@ -56,12 +56,12 @@ test("each line of a scene ends with a full stop and a pause, so headings and li
   assert.deepEqual(
     sentences({ text: scene, voice: "v" }).map((u) => [u.text, u.pause]),
     [
-      ["Brackenford Square.", 0.5],
+      ["Brackenford Square.", LINE_PAUSE],
       ["A muddy square ringed by crooked houses.", undefined],
-      ["East, the road narrows.", 0.5],
-      ["Exits: inn (The Hollow Lantern), east (Edge of the Thornwood).", 0.5],
-      ["People here: a hunched old man in a sodden wool coat.", 0.5],
-      ["You see: torn notice.", 0.5],
+      ["East, the road narrows.", LINE_PAUSE],
+      ["Exits: inn (The Hollow Lantern), east (Edge of the Thornwood).", LINE_PAUSE],
+      ["People here: a hunched old man in a sodden wool coat.", LINE_PAUSE],
+      ["You see: torn notice.", LINE_PAUSE],
     ],
   );
 });
@@ -78,4 +78,11 @@ test("nothing is said while reading aloud is off, and turning it off stops what'
   assert.equal(said.length, 1);
   voice.setEnabled(false);
   assert.equal(stopped, 1);
+});
+
+test("only three quarters of the silence around a sentence is kept", () => {
+  const speech = new Float32Array([0, 0, 0, 0, 0.5, -0.5, 0, 0, 0, 0, 0, 0, 0, 0]);
+  const trimmed = trimSilence(speech, 0.75);
+  assert.deepEqual(Array.from(trimmed), [0, 0, 0, 0.5, -0.5, 0, 0, 0, 0, 0, 0]);
+  assert.equal(trimSilence(new Float32Array(4), 0.75).length, 4);
 });

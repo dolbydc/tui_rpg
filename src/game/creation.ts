@@ -29,7 +29,7 @@ const ask = (text: string): LogLine => ({ kind: "system", text });
 export function startCreation(): CreationStep {
   return {
     creation: { step: "name" },
-    lines: [ask("A new character. (Type /cancel to go back to your current game.)"), ask("What is your character's name?")],
+    lines: [ask("A new character. (Type /cancel to go back.)"), ask("What is your character's name?")],
   };
 }
 

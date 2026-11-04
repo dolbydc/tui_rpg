@@ -78,12 +78,15 @@ test("only one thing is picked up at a time, and the player is told what's left"
   assert.deepEqual(engine.resolve({ kind: "take", items: ["the hook", "the key"] }, depths), {
     ok: true,
     events: [{ type: "item_taken", item: "hook on a stick", locationId: "forest-depths-1" }],
-    notes: ["(You can only pick up one thing at a time. The iron key is still here.)"],
+    notes: ["(You can only pick up one thing at a time. The lantern-key is still here.)"],
   });
-  const some = engine.resolve({ kind: "take", items: ["lantern", "key"] }, depths);
-  assert.ok(some.ok && some.events[0].type === "item_taken" && some.events[0].item === "an iron key");
+  const some = engine.resolve({ kind: "take", items: ["lamp", "key"] }, depths);
+  assert.ok(some.ok && some.events[0].type === "item_taken" && some.events[0].item === "lantern-key");
   assert.deepEqual(some.ok && some.notes, ["(You can only pick up one thing at a time.)"]);
-  assert.equal(engine.resolve({ kind: "take", items: ["lantern"] }, depths).ok, false);
+  assert.equal(engine.resolve({ kind: "take", items: ["lamp"] }, depths).ok, false);
+  // A hyphen in the name is as good as a space.
+  const spaced = engine.resolve({ kind: "take", items: ["the Lantern Key"] }, depths);
+  assert.ok(spaced.ok && spaced.events[0].type === "item_taken" && spaced.events[0].item === "lantern-key");
 });
 
 test("talking needs the NPC to be present", () => {
@@ -97,7 +100,7 @@ test("quests load their definition of done and reward", () => {
   const lantern = engine.world.quests.get("missing-lantern");
   assert.deepEqual(lantern?.done, [
     { kind: "visited", locationId: "forest-depths-1" },
-    { kind: "gave", item: "iron key", npcId: "marta" },
+    { kind: "gave", item: "lantern-key", npcId: "marta" },
   ]);
   assert.deepEqual(lantern?.reward, { xp: 100, items: ["5 silver pennies"] });
 });

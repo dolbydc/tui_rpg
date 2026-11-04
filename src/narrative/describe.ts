@@ -18,8 +18,7 @@ function capitalize(text: string): string {
  * the player learns them).
  */
 export function presentToPlayer(lines: LogLine[], npcs: readonly NpcDef[], known: readonly string[]): LogLine[] {
-  const unknown = npcs.filter((npc) => !known.includes(npc.id));
-  const mask = (text: string) => maskNames(text, unknown);
+  const mask = (text: string) => maskNames(text, npcs, known);
   return lines.map((line) => {
     if (line.kind === "narration") return { ...line, text: mask(line.text) };
     if (line.kind !== "npc") return line;
@@ -33,17 +32,28 @@ export function presentToPlayer(lines: LogLine[], npcs: readonly NpcDef[], known
   });
 }
 
-/** Replaces each NPC's name (in full, then by its parts) with their epithet, capitalized at a sentence start. */
-function maskNames(text: string, npcs: readonly NpcDef[]): string {
-  let masked = text;
+/**
+ * Replaces the name of each NPC the player doesn't know (in full, or any part of it) with their epithet,
+ * capitalized at a sentence start. Every name is matched at once, longest first, so a full name is taken
+ * whole before its parts: "Tam Brennick", known, stays as it is even while Nell Brennick, unknown, is
+ * masked. A part shared with someone the player knows (their family name, say) is left alone.
+ */
+function maskNames(text: string, npcs: readonly NpcDef[], known: readonly string[]): string {
+  const replacement = new Map<string, string | undefined>();
   for (const npc of npcs) {
+    const masked = known.includes(npc.id) ? undefined : npc.epithet;
     for (const form of nameForms(npc)) {
-      masked = masked.replace(new RegExp(`\\b${escapeRegExp(form)}\\b`, "g"), (_match, offset: number, whole: string) =>
-        /(^|[.!?*]\s*|^\s*)$/.test(whole.slice(0, offset)) ? capitalize(npc.epithet) : npc.epithet,
-      );
+      if (!replacement.has(form) || masked === undefined) replacement.set(form, masked);
     }
   }
-  return masked;
+  if (![...replacement.values()].some((epithet) => epithet !== undefined)) return text;
+  const forms = [...replacement.keys()].sort((a, b) => b.length - a.length);
+  const pattern = new RegExp(`\\b(?:${forms.map(escapeRegExp).join("|")})\\b`, "g");
+  return text.replace(pattern, (match: string, offset: number, whole: string) => {
+    const epithet = replacement.get(match);
+    if (epithet === undefined) return match;
+    return /(^|[.!?*]\s*|^\s*)$/.test(whole.slice(0, offset)) ? capitalize(epithet) : epithet;
+  });
 }
 
 /**

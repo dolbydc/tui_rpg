@@ -9,7 +9,13 @@ interface Audio {
 }
 
 /** Silence at the end of each line of text: after a heading, the exits, who's here… */
-export const LINE_PAUSE = 0.5;
+export const LINE_PAUSE = 0.375;
+
+/**
+ * How much of the silence Kokoro puts around each sentence is kept (about 0.26 s before and 0.7 s after):
+ * all of it makes too long a pause between sentences.
+ */
+export const SILENCE_KEPT = 0.75;
 
 export interface KokoroOptions {
   /** Told once, when speech can't work (no model, no audio player); after that the speaker stays silent. */
@@ -126,7 +132,8 @@ export class KokoroSpeaker implements Speaker {
     });
   }
 
-  private play({ samples: speech, rate, pause = 0 }: Audio): Promise<void> {
+  private play({ samples: generated, rate, pause = 0 }: Audio): Promise<void> {
+    const speech = trimSilence(generated, SILENCE_KEPT);
     // The pause is played as silence after the speech, so it's part of the line and Tab skips it too.
     const samples = new Float32Array(speech.length + Math.round(rate * pause));
     samples.set(speech);
@@ -140,6 +147,19 @@ export class KokoroSpeaker implements Speaker {
     this.queue = [];
     this.onError(err instanceof Error ? err : new Error(String(err)));
   }
+}
+
+/** Below this, a sample is silence. */
+const QUIET = 0.01;
+
+/** The speech with only `kept` of the silence before and after it. */
+export function trimSilence(samples: Float32Array, kept: number): Float32Array {
+  const first = samples.findIndex((s) => Math.abs(s) > QUIET);
+  if (first === -1) return samples;
+  let last = samples.length - 1;
+  while (Math.abs(samples[last]) <= QUIET) last--;
+  const trail = samples.length - 1 - last;
+  return samples.subarray(first - Math.round(first * kept), last + 1 + Math.round(trail * kept));
 }
 
 type WorkerReply =
@@ -159,6 +179,11 @@ const { parentPort, workerData } = require("node:worker_threads");
 delete globalThis.__dirname;
 import(workerData.kokoro).then(({ KokoroTTS }) => KokoroTTS.from_pretrained(workerData.model, { dtype: workerData.dtype, device: "cpu" })).then(
   (tts) => {
+    // kokoro-js only lets English voices speak, and only in their own accent: the first letter of the voice
+    // is its language. The others (Spanish ef_dora, em_alex, em_santa; French, Italian, Portuguese, Hindi,
+    // Japanese, Mandarin) are let through to read English too, as American English, in their own accent.
+    const validate = tts._validate_voice.bind(tts);
+    tts._validate_voice = (voice) => (/^[efhijpz][fm]_/.test(voice) ? "a" : validate(voice));
     parentPort.postMessage({ ready: true });
     let queue = Promise.resolve();
     // Requests from before the last stop are dropped unsaid.

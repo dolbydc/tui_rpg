@@ -1,4 +1,4 @@
-import { readdir, readFile } from "node:fs/promises";
+import { access, readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { layoutMap, MAP_LABEL, mapLabel } from "./map.js";
@@ -21,11 +21,12 @@ import type {
 
 /**
  * Loads a campaign directory:
- *   world.md            title, starting state (incl. start_time), quests with their definition of done and reward (frontmatter)
- *                       and intro (body)
+ *   world.md            title, starting state (incl. start_time), music, quests with their definition of done and reward
+ *                       (frontmatter) and intro (body)
  *   rules.md            narrator tone and rules (body)
- *   locations/<id>.md   name, label and map position (optional), exits, items, hidden_items, arrival_check
+ *   locations/<id>.md   name, label and map position (optional), exits, items, hidden_items, arrival_check, music
  *                       (frontmatter) and description (body)
+ * Music is an audio file's path, from the campaign directory; a location's `music: none` is silence.
  *   npcs/<id>.md        name, epithet, appearance, pronouns, voice, speech, location, routine, perception, discretion,
  *                       goals, knowledge, trusts (frontmatter) and persona (body)
  */
@@ -51,6 +52,7 @@ export async function loadWorld(dir: string): Promise<WorldDefinition> {
       items: strList(doc.data.items ?? [], "items", file),
       hiddenItems: hiddenItems(doc.data.hidden_items ?? [], file),
       ...(doc.data.arrival_check === undefined ? {} : { enterCheck: checkRequest(doc.data.arrival_check, file) }),
+      ...(doc.data.music === undefined ? {} : { music: await music(doc.data, dir, file) }),
     });
   }
 
@@ -83,6 +85,7 @@ export async function loadWorld(dir: string): Promise<WorldDefinition> {
     intro: unwrap(world.body),
     rules: rules.body,
     ...(world.data.narrator_voice === undefined ? {} : { narratorVoice: str(world.data, "narrator_voice", worldFile) }),
+    ...(world.data.music === undefined ? {} : { music: (await music(world.data, dir, worldFile, false)) ?? undefined }),
     start: {
       locationId: str(world.data, "start", worldFile),
       time: startTime(world.data.start_time, worldFile),
@@ -195,6 +198,17 @@ function character(value: unknown, file: string): Character {
 }
 
 /** A roll made on first arriving somewhere, e.g. `{stat: wits, why: keep your nerve among the hanged men}`. */
+/** The audio file `music` names, from the campaign directory; "none" (where `silence` is allowed) is null. */
+async function music(data: Record<string, unknown>, dir: string, file: string, silence = true): Promise<string | null> {
+  const value = str(data, "music", file);
+  if (silence && value === "none") return null;
+  const resolved = path.resolve(dir, value);
+  await access(resolved).catch(() => {
+    throw new Error(`${file}: music file "${value}" isn't there (it's looked for from ${dir})`);
+  });
+  return resolved;
+}
+
 function checkRequest(value: unknown, file: string, key = "arrival_check"): CheckRequest {
   if (!isRecord(value)) throw new Error(`${file}: "${key}" must be a mapping like {stat: wits, why: ...}`);
   return { stat: str(value, "stat", file), why: str(value, "why", file) };

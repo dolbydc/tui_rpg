@@ -25,7 +25,7 @@ quests:
     #   have: <item>   gave: {item: <item>, to: <npc>}   at: <location>   visited: <location>   knows: <npc>
     done:
       - visited: forest-depths-1
-      - gave: { item: iron key, to: marta }
+      - gave: { item: lantern-key, to: marta }
     reward:
       xp: 100
       items:
