@@ -12,6 +12,7 @@ export type Command =
   | { kind: "cancel" }
   | { kind: "push"; text: string }
   | { kind: "voice"; on?: boolean }
+  | { kind: "music"; on?: boolean }
   | { kind: "invalid"; message: string };
 
 export const HELP = `Type anything to act; the narrator interprets it.
@@ -19,11 +20,11 @@ Each turn you have ${ACTIONS_PER_TURN} actions: moving, talking, taking (one ite
 looking around is free. People move about between turns. A turn is ${TURN_SECONDS / 60} minutes, or ${QUICK_TURN_SECONDS} seconds
 while you're in a conversation or a confrontation.
 Commands: /look  /search [where]  /go <exit>  /take <item>  /drop <item>  /give <item> to <name>  /talk <name> <message>
-          /wait (end the turn)  /sleep (until morning; restores HP)  /levelup <stat> (spend XP)  /new (new character and campaign)  /help  /quit
+          /wait (end the turn)  /sleep (until morning; restores HP)  /levelup <stat> (spend XP)  /new (the menu: switch campaign, or start again)  /help  /quit
 Risky attempts (lying, fighting, sneaking, keeping your nerve) are settled by a hidden roll: the best of
 2d6 plus your stat's bonus; you only see how the story goes. Push one (/push <what you do>, or say you
 give it everything) to spend a drive and roll 3d6 instead. Drive is restored when a new quest starts. Completing a quest earns its reward and experience; spend ${XP_PER_LEVEL} XP × your level to level up.
-Voice: /voice on|off reads narration and dialogue aloud; Tab skips what's being said.
+Voice: /voice on|off reads narration and dialogue aloud; Tab skips what's being said. /music on|off plays mood music.
 Debug: /memories <name> shows what an NPC remembers.`;
 
 /** Parses a slash command. Returns undefined for free text, which goes to the narrative engine. */
@@ -79,6 +80,9 @@ export function parseCommand(input: string): Command | undefined {
     case "voice":
       if (!rest) return { kind: "voice" };
       return /^(on|off)$/i.test(rest) ? { kind: "voice", on: rest.toLowerCase() === "on" } : needs("/voice [on|off]");
+    case "music":
+      if (!rest) return { kind: "music" };
+      return /^(on|off)$/i.test(rest) ? { kind: "music", on: rest.toLowerCase() === "on" } : needs("/music [on|off]");
     case "push":
       return rest ? { kind: "push", text: rest } : needs("/push <what you do>");
     case "quit":

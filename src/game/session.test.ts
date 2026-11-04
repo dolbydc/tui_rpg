@@ -281,13 +281,13 @@ test("going down to the cellar shows only the cellar's level, and coming back up
   assert.deepEqual([session.map.level, ids()], [0, ["village-square", "hollow-lantern-inn"]]);
 });
 
-test("/new makes a character, then restarts the campaign with them", async () => {
+test("/new goes to the menu; a new character there restarts the campaign with them", async () => {
   const { session, store } = setup();
   await session.start();
   await session.submit("/go east");
 
-  const prompt = await session.submit("/new");
-  assert.match(prompt.lines.at(-1)!.text, /name\?/);
+  assert.deepEqual(await session.submit("/new"), { lines: [], menu: true });
+  assert.match(session.newCharacter().at(-1)!.text, /name\?/);
   await session.submit("Ash Thorne");
   await session.submit("she");
   assert.match((await session.submit("might 6 wits 2 grace 1 charisma 2")).lines[0].text, /That's 11 points/);
@@ -311,11 +311,28 @@ test("/cancel abandons a new character and keeps the current game", async () => 
   const { session } = setup();
   await session.start();
   await session.submit("/go east");
-  await session.submit("/new");
+  session.newCharacter();
   await session.submit("Ash");
   assert.equal((await session.submit("/cancel")).lines[0].text, "Back to your game.");
   assert.equal(session.scene.character.name, "Wren");
   assert.equal(session.scene.location.id, "forest-edge");
+});
+
+test("a first character can be made before there's any game; giving up on it goes back to the menu", async () => {
+  const { session, store } = setup();
+  assert.equal(await session.resume(), undefined);
+  assert.equal(session.playing, false);
+  session.newCharacter();
+  await session.submit("Ash");
+  assert.deepEqual(await session.submit("/cancel"), { lines: [], menu: true });
+  assert.deepEqual(await session.submit("look around"), { lines: [], menu: true });
+
+  session.newCharacter();
+  for (const answer of ["Ash", "they", "3 3 2 2"]) await session.submit(answer);
+  const begun = await session.submit("yes");
+  assert.equal(begun.reset, true);
+  assert.equal(session.playing, true);
+  assert.equal((await store.load("test"))?.state.character.name, "Ash");
 });
 
 test("a quest completes when its definition of done holds, and pays out its reward", async () => {

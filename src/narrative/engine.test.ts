@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { DEFAULT_CAMPAIGN_DIR } from "../config.js";
 import { WorldEngine } from "../world/engine.js";
 import { loadWorld } from "../world/loader.js";
-import { describeScene } from "./describe.js";
+import { describeScene, presentToPlayer } from "./describe.js";
 import { parseIntent } from "./engine.js";
 import type { NpcMemory } from "../domain/types.js";
 import type { LlmProvider } from "../llm/provider.js";
@@ -170,4 +170,22 @@ test("each NPC's way of speaking reaches their dialogue prompt", async () => {
     const prompt = dialogueMessages("", npc, scene, [], "Hi", NONE, { given: [], knowsYourName: false })[0].content;
     assert.ok(prompt.includes(`How you speak (every word you say must sound like this; any example lines show the sound only, never say them):\n${npc.speech}`));
   }
+});
+
+test("people who share a family name are each shown as the player knows them", async () => {
+  const world = await loadWorld(`${DEFAULT_CAMPAIGN_DIR}/../those-dark-places`);
+  const npcs = [...world.npcs.values()];
+  const show = (text: string, known: string[]) => presentToPlayer([{ kind: "narration", text }], npcs, known)[0].text;
+  const text = "Teo Varga looks up. Ines Varga is his sister; Varga is a common name here.";
+  assert.equal(show(text, ["teo"]), "Teo Varga looks up. The foreman is his sister; Varga is a common name here.");
+  // Known to neither: a bare family name is masked as one of them, never shown.
+  assert.match(show(text, []), /^The survivor looks up\. The foreman is his sister; the (survivor|foreman) is a common/);
+  assert.equal(show(text, ["teo", "ines"]), text);
+});
+
+test("a title isn't a name: hearing it doesn't introduce anyone", async () => {
+  const world = new WorldEngine(await loadWorld(`${DEFAULT_CAMPAIGN_DIR}/../those-dark-places`));
+  const state = world.newGame("t");
+  assert.deepEqual(world.namesHeard(["Take it up with the administrator, or ask a brother of the Quiet Shift."], state), []);
+  assert.deepEqual(world.namesHeard(["Hask runs this place."], state).map((n) => n.id), ["hask"]);
 });

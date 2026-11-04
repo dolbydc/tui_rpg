@@ -10,6 +10,8 @@ export interface WorldDefinition {
   rules: string;
   /** Text-to-speech voice for narration (a Kokoro voice name, e.g. "bm_george"). */
   narratorVoice?: string;
+  /** Mood music, wherever a location doesn't choose its own: the path of an audio file, looped. */
+  music?: string;
   start: StartingState;
   locations: Map<string, LocationDef>;
   npcs: Map<string, NpcDef>;
@@ -65,6 +67,8 @@ export interface LocationDef {
   hiddenItems: HiddenItemDef[];
   /** A check the player must make on first arriving, e.g. keeping their nerve at something frightening. */
   enterCheck?: CheckRequest;
+  /** Mood music here instead of the world's (an audio file's path), or null for silence. */
+  music?: string | null;
 }
 
 /** Something not immediately visible: buried, behind something, hidden with magic… */

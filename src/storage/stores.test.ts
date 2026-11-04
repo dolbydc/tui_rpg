@@ -37,6 +37,29 @@ for (const [name, open] of [
     assert.equal(await store.load("c"), undefined);
     await store.close();
   });
+
+  test(`${name}: lists saved games, newest first, and moves one to a new id with its history`, async () => {
+    const store = open();
+    await store.commitTurn({ ...world.newGame("old"), turn: 4 }, record(4, "look"), [memory("seen")]);
+    await new Promise((r) => setTimeout(r, 5));
+    await store.commitTurn(world.newGame("other"), record(1, ""));
+    assert.deepEqual(
+      (await store.saves()).map((s) => [s.campaignId, s.characterName, s.turn]),
+      [["other", "Wren", 1], ["old", "Wren", 4]],
+    );
+
+    await store.rename("old", "new");
+    assert.equal(await store.load("old"), undefined);
+    const moved = (await store.load("new"))!;
+    assert.equal(moved.state.campaignId, "new");
+    assert.deepEqual(moved.recent.map((r) => r.input), ["look"]);
+    assert.deepEqual(moved.memories.map((m) => m.text), ["seen"]);
+    // Never over another save.
+    await store.rename("new", "other");
+    assert.ok(await store.load("new"));
+    assert.equal((await store.load("other"))!.state.turn, 1);
+    await store.close();
+  });
 }
 
 test("sqlite: a campaign survives closing and reopening the file; reset removes its history too", async () => {

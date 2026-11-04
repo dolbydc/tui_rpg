@@ -658,7 +658,11 @@ function initial(npc: NpcDef): string {
 }
 
 /** Titles that don't identify anyone on their own ("Old" in "Old Pell"). */
-const HONORIFICS = new Set(["old", "young", "mister", "mistress", "master", "lady", "lord", "sir", "dame", "mother", "father", "granny", "uncle", "aunt"]);
+// Titles aren't names: hearing "the administrator" mustn't introduce Administrator Hask.
+const HONORIFICS = new Set([
+  "old", "young", "mister", "mistress", "master", "lady", "lord", "sir", "dame", "mother", "father", "granny", "uncle", "aunt",
+  "brother", "sister", "doctor", "captain", "commander", "administrator", "director", "officer", "foreman", "chief",
+]);
 
 /** The ways someone might say an NPC's name: in full, or any distinctive part of it. Longest first. */
 export function nameForms(npc: NpcDef): string[] {

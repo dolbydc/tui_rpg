@@ -20,6 +20,13 @@ npm run dev       # run from source
 Or `npm run build && npm start`. `npm test` runs the tests (no Ollama needed),
 `npm run typecheck` checks types.
 
+**Start menu.** The game opens on a menu: carry on a saved game, or start a new game of any campaign
+in `content/` (↑↓ or a number to choose, Enter to start, Esc to quit). Each campaign has its own save,
+so starting one doesn't touch another's; starting a new game of a campaign you've saved replaces that
+save, and the menu says so. Two campaigns come with it: **The Hollow Lantern** (a missing lantern in a
+village at the edge of an old wood) and **Those Dark Places** (industrial space horror on a Combine
+mining platform, where a deep bore broke into something and the crew were sealed in with it). `/new` in game goes back to the menu.
+
 In game, type anything to act, or use `/look`, `/search [where]`, `/go <exit>`, `/take <item>`,
 `/drop <item>`, `/give <item> to <name>`, `/talk <name> <message>`, `/wait`, `/new`, `/help`, `/quit` (Esc also quits).
 Progress autosaves after every action and resumes on the next launch. `/memories <name>` shows what an
@@ -66,9 +73,9 @@ later: an NPC who was lied to, pushed or tricked works out what really happened 
 that place, and the place stays changed ("Changed: …" in its description). Rules are in
 `src/world/checks.ts`.
 
-**New characters.** `/new` asks for a name, pronouns, and a share of 10 points among the stats
-(each 1–6), then replaces the current campaign with a fresh one (`/cancel` backs out first).
-The campaign's own character (`world.md`) is used for a first launch.
+**New characters.** A new game asks for a name, pronouns, and a share of 10 points among the stats
+(each 1–6, named by the campaign), then begins. `/cancel` backs out, to the game you were playing or
+to the menu.
 
 Completing a quest (its `done` conditions, below) pays its **reward**: items and experience.
 Experience is spent with `/levelup <stat>`: reaching level n+1 costs 100 × n XP and raises that stat
@@ -103,7 +110,16 @@ Your own input and system notes aren't read. Speech starts about 1.5 s after a r
 skips it, a new action cuts it off, and `/voice` toggles it. Voices: `af_heart`, `af_bella`,
 `af_nicole`, `af_river`, `af_sarah`, `am_adam`, `am_michael`, `am_fenrir`, … (American) and
 `bf_emma`, `bf_isabella`, `bf_alice`, `bf_lily`, `bm_george`, `bm_lewis`, `bm_daniel`, `bm_fable`
-(British).
+(British). Kokoro's other voices speak English in their own accent: `ef_dora`, `em_alex`,
+`em_santa` (Spanish), `ff_siwis` (French), `if_sara`, `im_nicola` (Italian), `pf_dora`, `pm_alex`,
+`pm_santa` (Brazilian Portuguese), `hf_alpha`, `hm_omega` (Hindi), `jf_alpha`, `jf_gongitsune`, `jf_nezumi`, `jf_tebukuro`, `jm_kumo`
+(Japanese), `zf_xiaobei`, `zm_yunjian` (Mandarin), …
+
+**Music.** Each campaign can set mood music (`music` in `world.md`), and any location can set its
+own instead, or `music: none` for silence there. It loops quietly under the voice through the same
+system players (`src/voice/music.ts`), carries on while you stay put, and changes as you move;
+`/music` toggles it. WAV plays everywhere; MP3 plays on macOS and Windows, and on Linux through
+paplay or pw-play with a recent libsndfile; Ogg and FLAC play on Linux and (FLAC) macOS.
 
 **Travel.** Going to a place you've already been (`/go cellar`, "head back to the Thornwood")
 walks the shortest path through places you've visited, one action per step, carrying on into the
@@ -130,17 +146,19 @@ a box's border marks stairs up or down.
 | `OLLAMA_URL` / `OLLAMA_MODEL` | `http://localhost:11434` / `gemma4:12b` | |
 | `TUI_RPG_STORAGE` | `sqlite` | `memory` saves nothing |
 | `TUI_RPG_DB` | `data/tui_rpg.db` | the SQLite file |
-| `TUI_RPG_CAMPAIGN_DIR` | `content/hollow-lantern` | campaign content to load |
-| `TUI_RPG_CAMPAIGN_ID` | `default` | save slot |
+| `TUI_RPG_CONTENT_DIR` | `content` | the folder of campaigns the menu offers, one folder each |
 | `TUI_RPG_VOICE` | `on` | `off` starts with reading aloud off (`/voice on` turns it on) |
 | `TUI_RPG_PLAYER` | per system | `paplay`, `pw-play`, `aplay`, `afplay` or `powershell`: what plays the audio |
+| `TUI_RPG_MUSIC` | `on` | `off` starts with the music off (`/music on` turns it on) |
+| `TUI_RPG_MUSIC_VOLUME` | `0.4` | music volume, 0–1 (`aplay` plays at full volume) |
 
 ## Architecture
 
 ```
-tui/          Terminal UI: dialogue log, map, character sheet and turn, inventory, quest log, input
+tui/          Terminal UI: start menu; dialogue log, map, character sheet and turn, inventory, quest log, input
   │
-game/         Session controller: commands, the turn pipeline, save/load
+game/         Campaign library (what's in content/, and its saves); session controller: commands, the
+  │           turn pipeline, save/load
   │
   ├── world/      World engine: loads campaign markdown; resolves intents and applies events;
   │               what NPCs perceive and what they're allowed to share (no LLM)
@@ -171,10 +189,14 @@ through `MockProvider`, which scripts model replies and records prompts.
 
 ### Campaign content
 
-A campaign is a directory of markdown files with YAML frontmatter; see `content/hollow-lantern`:
+A campaign is a directory under `content/` of markdown files with YAML frontmatter; see
+`content/hollow-lantern`. Any folder there with a `world.md` is offered at the start menu; its folder
+name is its id, and its save's. (Saves from before the menu, under the id `default`, are moved to
+`hollow-lantern` on launch.)
 
-- `world.md`: title, starting location, character (name, pronouns, hp, stats, inventory, and
-  optionally level and xp) and quests; the body is the intro. Each quest has a definition of done
+- `world.md`: title, `tagline` (one line for the menu), starting location, character (name, pronouns, hp, stats, inventory, and
+  optionally level and xp), `music` (an audio file's path from the campaign folder, e.g.
+  `music: music/hum.mp3`; optional) and quests; the body is the intro. Each quest has a definition of done
   (`done`) the world engine checks after every action, and a `reward`:
 
   ```yaml
@@ -202,6 +224,8 @@ A campaign is a directory of markdown files with YAML frontmatter; see `content/
   and wherever things are put down.
   Optional `arrival_check: {stat: wits, why: keep their nerve among the hanged men}` makes the
   player roll on first arriving (`why` reads after "trying to").
+  Optional `music` plays here instead of the world's (`music: none` is silence). A music file
+  that isn't there stops the campaign loading.
   `hidden_items` are items not visible until the player searches (`/search [where]`, or "I look
   behind the crates", "I dig…"); searching costs an action, and a found item lies in plain sight to
   be taken. Each is a name, or:

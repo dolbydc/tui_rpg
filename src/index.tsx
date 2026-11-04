@@ -2,20 +2,18 @@
 // Composition root: the only place that picks concrete implementations.
 import { render } from "ink";
 import { loadConfig, type Config } from "./config.js";
-import { SessionController } from "./game/session.js";
+import { CampaignLibrary } from "./game/campaigns.js";
 import { MockProvider } from "./llm/mock.js";
 import { OllamaProvider } from "./llm/ollama.js";
 import type { LlmProvider } from "./llm/provider.js";
-import { NarrativeEngine } from "./narrative/engine.js";
 import { InMemoryStore } from "./storage/memory.js";
 import { SqliteStore } from "./storage/sqlite.js";
 import type { CampaignStore } from "./storage/store.js";
-import { App } from "./tui/app.js";
+import { Root } from "./tui/root.js";
 import { KokoroSpeaker } from "./voice/kokoro.js";
+import { MusicPlayer } from "./voice/music.js";
 import { systemPlayer } from "./voice/players.js";
 import { VoiceOver } from "./voice/voice-over.js";
-import { WorldEngine } from "./world/engine.js";
-import { loadWorld } from "./world/loader.js";
 
 function createProvider(config: Config): LlmProvider {
   return config.llm === "mock"
@@ -29,30 +27,30 @@ function createStore(config: Config): CampaignStore {
 
 async function main() {
   const config = loadConfig();
-  const world = new WorldEngine(await loadWorld(config.campaignDir));
   const store = createStore(config);
   const llm = createProvider(config);
-  // Load the model in the background while the player reads the intro; errors surface on the first turn.
+  // Load the model in the background while the player picks a campaign; errors surface on the first turn.
   void llm.warmUp?.().catch(() => {});
-  const session = new SessionController({
-    world,
-    narrative: new NarrativeEngine(llm, world.world.rules),
-    store,
-    campaignId: config.campaignId,
-  });
+  const library = await CampaignLibrary.load(config.contentDir, store, llm);
 
   // Reading aloud: the speech model loads in the background too (or on /voice on, if it starts off). If it
-  // can't work, the player is told once and it goes quiet.
+  // can't work, the player is told once and it goes quiet. Each campaign brings its own voices (see Root).
   const speaker = new KokoroSpeaker({
     onError: (err) => voice.report(`Reading aloud is off: ${err.message}`),
     player: systemPlayer(process.platform, config.player),
   });
-  const voice = new VoiceOver(speaker, world.world, config.voice === "on");
+  const voice = new VoiceOver(speaker, { npcs: new Map() }, config.voice === "on");
   if (config.voice === "on") void speaker.warmUp().catch(() => {});
+  const music = new MusicPlayer({
+    volume: config.musicVolume,
+    enabled: config.music === "on",
+    onError: (err) => voice.report(`Music is off: ${err.message}`),
+    choice: config.player,
+  });
 
-  const initial = await session.start();
-  const app = render(<App session={session} initial={initial} voice={voice} />);
+  const app = render(<Root library={library} voice={voice} music={music} />);
   await app.waitUntilExit();
+  music.close();
   await speaker.close();
   await store.close();
 }
