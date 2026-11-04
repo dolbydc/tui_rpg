@@ -494,8 +494,9 @@ export function findMatch<T>(candidates: readonly T[], query: string, keys: (c: 
   );
 }
 
+/** Lower case, without a leading article, and a hyphen is a space ("the Lantern-Key" = "lantern key"). */
 function normalize(text: string): string {
-  return text.trim().toLowerCase().replace(/^(the|a|an)\s+/, "");
+  return text.trim().toLowerCase().replace(/[-\s]+/g, " ").replace(/^(the|a|an)\s+/, "");
 }
 
 /**

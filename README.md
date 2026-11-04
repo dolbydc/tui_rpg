@@ -206,7 +206,7 @@ name is its id, and its save's. (Saves from before the menu, under the id `defau
       description: ...
       done:                      # complete as soon as all of these hold
         - visited: forest-depths-1
-        - gave: { item: iron key, to: marta }
+        - gave: { item: lantern-key, to: marta }
       reward:
         xp: 100
         items: [5 silver pennies]
