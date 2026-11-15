@@ -12,6 +12,8 @@ export interface WorldDefinition {
   narratorVoice?: string;
   /** Mood music, wherever a location doesn't choose its own: the path of an audio file, looped. */
   music?: string;
+  /** How pictures of its places are drawn ("painterly dark-fantasy concept art, moody"), when they're drawn. */
+  artStyle?: string;
   start: StartingState;
   locations: Map<string, LocationDef>;
   npcs: Map<string, NpcDef>;
@@ -365,6 +367,8 @@ export interface MapCell {
   items: number;
   /** Exits up or down to another level. */
   stairs: { up: boolean; down: boolean };
+  /** A picture of the place (an image file's path), for frontends that show one: its own, or one drawn. */
+  image?: string;
 }
 
 export interface LogLine {

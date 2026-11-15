@@ -10,7 +10,7 @@
     "dev": "tsx src/index.tsx",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
-    "electron": "npm run build && install-electron && electron dist/electron/main.js",
+    "electron": "npm run build && install-electron && node dist/electron/launch.js",
     "engine": "tsx src/engine/host.ts",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test \"src/**/*.test.{ts,tsx}\""

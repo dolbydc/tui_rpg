@@ -5,6 +5,8 @@ tagline: Deep Bore 4 broke into something. The Combine sealed the crew in. You'r
 start: dock-three
 # Station time. Night cycle: the corridor lights are dimmed to save on the power bill.
 start_time: "23:10"
+# How pictures of its places are drawn, in a frontend that draws them (the Electron window, with ComfyUI).
+art_style: "Gritty industrial sci-fi concept art: cinematic, desaturated, harsh practical lighting, volumetric haze, grime and rust, 50mm lense, camera flare from lights like J.J Abrams star trek movies"
 # Kokoro text-to-speech voice for narration (see README for the list).
 narrator_voice: am_onyx
 character:

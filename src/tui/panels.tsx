@@ -201,7 +201,7 @@ export function QuestLog({ quests }: { quests: Quest[] }) {
 export function InputLine({ line, busy }: { line: LineState; busy: boolean }) {
   const { text, cursor } = line;
   return (
-    <Box paddingX={1}>
+    <Box paddingX={1} flexShrink={0}>
       <Text color="yellow">&gt; </Text>
       {busy ? (
         <Text dimColor>thinking…</Text>

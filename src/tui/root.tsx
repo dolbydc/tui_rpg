@@ -12,7 +12,7 @@ type Screen =
   | { kind: "game"; opened: Opened; key: number };
 
 /** The start menu, then the game chosen there; /new comes back to the menu. */
-export function Root({ game, voice, music }: { game: Game; voice: VoiceOver; music: MusicPlayer }) {
+export function Root({ game, voice, music, sidebar = true }: { game: Game; voice: VoiceOver; music: MusicPlayer; sidebar?: boolean }) {
   const { exit } = useApp();
   const [screen, setScreen] = useState<Screen>({ kind: "loading" });
 
@@ -58,6 +58,7 @@ export function Root({ game, voice, music }: { game: Game; voice: VoiceOver; mus
           voice={voice}
           music={music}
           onMenu={() => void showMenu()}
+          sidebar={sidebar}
         />
       );
   }

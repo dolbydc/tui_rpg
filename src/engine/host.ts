@@ -8,7 +8,8 @@ import { serve } from "./protocol.js";
 console.log = console.info = console.warn = console.error;
 
 // A bad setting fails every request with what was wrong, rather than the process with a stack trace.
-const game = Promise.resolve().then(() => createGame(loadConfig()));
+// Frontends in other processes are windows that can show pictures (Electron), so places are drawn if ComfyUI is set.
+const game = Promise.resolve().then(() => createGame(loadConfig(), { pictures: true }));
 game.catch((err: unknown) => console.error(err instanceof Error ? err.message : err));
 await serve(game, process.stdin, process.stdout);
 await game.then((g) => g.close()).catch(() => {});

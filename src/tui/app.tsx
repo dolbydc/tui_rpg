@@ -18,10 +18,12 @@ interface AppProps {
   music: MusicPlayer;
   /** Back to the start menu (/new). */
   onMenu: () => void;
+  /** Draw the sidebar (map, character, inventory, quests); off where the frontend draws its own. */
+  sidebar?: boolean;
 }
 
 /** A game in progress, or a character being made for one (before there's a game, without the sidebar). */
-export function App({ game, opened, voice, music, onMenu }: AppProps) {
+export function App({ game, opened, voice, music, onMenu, sidebar = true }: AppProps) {
   const { exit } = useApp();
   const { rows } = useWindowSize();
   const [log, setLog] = useState<LogLine[]>(opened.lines);
@@ -36,6 +38,11 @@ export function App({ game, opened, voice, music, onMenu }: AppProps) {
     // A new game's opening is read aloud; a resumed one's history isn't.
     if (!opened.resumed) voice.say(opened.lines);
     music.play(opened.view.music);
+    // Between turns, the game can change by itself (a picture drawn) or have something to say.
+    return game.subscribe((event) => {
+      if (event.kind === "view") setView(event.view);
+      else setLog((log) => [...log, { kind: "system", text: event.text }]);
+    });
   }, []);
 
   async function submit(text: string) {
@@ -94,10 +101,12 @@ export function App({ game, opened, voice, music, onMenu }: AppProps) {
 
   const { player } = view;
   return (
-    <Box flexDirection="column" height={Math.max(rows - 1, 16)}>
-      <Box flexGrow={1}>
+    <Box flexDirection="column" height={Math.max(rows - 1, sidebar ? 16 : 6)}>
+      {/* Exactly the height the input line leaves: sized from its content, a long story pushed the input line
+          out of the frame in a short terminal. The story inside is cut at the top instead. */}
+      <Box flexGrow={1} flexShrink={1} flexBasis={0} minHeight={0} overflow="hidden">
         <DialogueLog title={`${view.title} · ${player ? player.place.name : "A new character"}`} lines={log} busy={busy} />
-        {player && (
+        {player && sidebar && (
           <Box flexDirection="column" width={SIDEBAR_WIDTH} flexShrink={0}>
             <MapPanel map={player.map} width={SIDEBAR_WIDTH} rows={mapRows} />
             <CharacterSheet character={player.character} status={player.status} />

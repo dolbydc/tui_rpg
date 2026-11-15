@@ -21,11 +21,40 @@ Or `npm run build && npm start`. `npm test` runs the tests (no Ollama needed),
 `npm run typecheck` checks types.
 
 **In a window.** `npm run electron` plays the same game in an [Electron](https://www.electronjs.org)
-window: the terminal UI drawn by [xterm.js](https://xtermjs.org), with pictures of the place and the
-people there beside it when the campaign has them (`image`, below). The first run downloads Electron
+window. The picture of the place runs across the top when there is one (`image`, below, or drawn as
+you go), with the story and the input line beneath it, the terminal UI drawn by
+[xterm.js](https://xtermjs.org); without a picture the story has the whole height. Down the side, the
+map, character (HP, level and experience, stats, time, actions and drive), who's here (with portraits
+when there are some), inventory and quests are panels drawn from the game's view (`src/electron/page.ts`,
+`electron/panels.js`) rather than by the terminal UI. The map shows each place you've been as a card with
+its picture, joined by trails, with exits you haven't taken trailing off to a `?`; click it to open the
+whole level full-size (a click or Esc closes it). Under WSL, `npm run electron` starts Electron on
+Wayland (`src/electron/launch.ts`): on WSLg's X11 the mouse pointer goes missing over the window.
+`TUI_RPG_OZONE=x11` keeps X11. The first run downloads Electron
 (`install-electron`). The engine runs in a Node.js process of its own, started with the `node` on the
 `PATH` (`TUI_RPG_NODE` picks another): its SQLite module is built for Node, not Electron. Under WSL the
 window opens through WSLg; if it doesn't, try `npm run electron -- --ozone-platform=wayland`.
+
+**Pictures drawn as you go.** With a [ComfyUI](https://www.comfy.org) server to draw them
+(`TUI_RPG_COMFY_URL`), the window shows a picture of each place the first time you arrive there, and a
+portrait of each person the first time you see them, if the campaign hasn't one of its own. A portrait
+is drawn from how they look (`appearance`) alone, never their persona, knowledge or name, and is shown
+over the picture and in the "Here" panel; it's kept in `data/art/<campaign>/people/<npc>.png`. Places
+are drawn before portraits. For a place: the language model turns the place's description into a prompt
+(what can be seen, its light and mood, no people and no lettering), ComfyUI draws it in the campaign's
+`art_style`, and it appears beside the game when it's ready, without holding up play (a "drawing…"
+frame waits in its place). Each place is drawn once, one at a time with the newest first, and kept in
+`data/art/<campaign>/<location>.png` with the prompt beside it; delete both to have it drawn again. If
+ComfyUI can't be reached the player is told once and the game carries on without pictures. The
+terminal game never draws.
+
+ComfyUI Desktop comes with MOSS-Image, which the default workflow uses (about 30 s a picture on a
+12 GB card while the language model stays loaded); `TUI_RPG_COMFY_MODEL=zimage` uses Z-Image-Turbo
+instead, which has to be downloaded into ComfyUI (`z_image_turbo_int8_convrot`, `qwen_3_4b_fp8_mixed`
+and `ae`, from its Z-Image-Turbo template). Under WSL, ComfyUI on Windows listens only on Windows'
+own localhost; start it with `--listen 127.0.0.1,<the WSL adapter's address> --port 8188` (the address
+is the default route from inside WSL, `ip route | grep default`) and set
+`TUI_RPG_COMFY_URL=http://<that address>:8188`.
 
 **Start menu.** The game opens on a menu: carry on a saved game, or start a new game of any campaign
 in `content/` (↑↓ or a number to choose, Enter to start, Esc to quit). Each campaign has its own save,
@@ -159,6 +188,10 @@ a box's border marks stairs up or down.
 | `TUI_RPG_MUSIC` | `on` | `off` starts with the music off (`/music on` turns it on) |
 | `TUI_RPG_MUSIC_VOLUME` | `0.4` | music volume, 0–1 (`aplay` plays at full volume) |
 | `TUI_RPG_NODE` | `node` | the Node.js the Electron window runs the engine with |
+| `TUI_RPG_OZONE` | (Wayland under WSL) | `x11` runs the Electron window on X11 under WSL |
+| `TUI_RPG_COMFY_URL` | (none) | a ComfyUI server to draw pictures of places with, e.g. `http://127.0.0.1:8188` |
+| `TUI_RPG_COMFY_MODEL` | `moss` | `zimage` draws with Z-Image-Turbo |
+| `TUI_RPG_ART_DIR` | `data/art` | where drawn pictures are kept |
 
 ## Architecture
 
@@ -167,13 +200,16 @@ campaigns and saves, open one, and submit what the player types; each answer car
 what the player can see (never what's hidden from them: NPCs' names they haven't learned, personas,
 knowledge, hidden quests). It's all plain data, so a frontend can run the engine in its own process
 (`LocalGame`) or talk to it in another (`RemoteGame`) over the engine host's stdin and stdout, one JSON
-message a line (`src/engine/protocol.ts`; `npm run engine` starts one). Frontends import from
-`engine/api.ts` only, never the engine's internals.
+message a line (`src/engine/protocol.ts`; `npm run engine` starts one). Between answers the engine can
+speak up of its own accord (`Game.subscribe()`, events over the protocol): a fresh view when a picture
+has been drawn, or a notice for the player. Frontends import from `engine/api.ts` only, never the
+engine's internals.
 
 ```
 index.tsx     The terminal game: the engine in-process (engine/create.ts), drawn in this terminal
 electron/     The window (src/electron, page in electron/): the engine in a child process
-  │           (engine/spawn.ts → engine/host.ts), the terminal UI drawn by xterm.js, pictures beside it
+  │           (engine/spawn.ts → engine/host.ts); the picture over the story (the terminal UI without its
+  │           sidebar, drawn by xterm.js); HTML panels for the map, character, people, inventory, quests
   │
 tui/          Terminal UI over a Game: start menu; dialogue log, map, character sheet and turn, inventory,
   │           quest log, input. Draws in this process's terminal, or any other (tui/terminal.ts)
@@ -181,6 +217,8 @@ voice/        Speaker interface: Kokoro text-to-speech; turns log lines into who
   │           the engine gives); mood music. Frontends own audio: /voice and /music just ask them
   │
 engine/       The contract (api.ts); LocalGame over the session; the host, its protocol and RemoteGame
+  │
+art/          Illustrator: pictures of places, prompted by the language model and drawn by ComfyUI
   │
 game/         Campaign library (what's in content/, and its saves); session controller: commands, the
   │           turn pipeline, save/load
@@ -222,7 +260,8 @@ name is its id, and its save's. (Saves from before the menu, under the id `defau
 
 - `world.md`: title, `tagline` (one line for the menu), starting location, character (name, pronouns, hp, stats, inventory, and
   optionally level and xp), `music` (an audio file's path from the campaign folder, e.g.
-  `music: music/hum.mp3`; optional) and quests; the body is the intro. Each quest has a definition of done
+  `music: music/hum.mp3`; optional), `art_style` (how drawn pictures of its places should look, e.g.
+  `"Painterly dark-fantasy concept art: moody, soft volumetric light"`; optional) and quests; the body is the intro. Each quest has a definition of done
   (`done`) the world engine checks after every action, and a `reward`:
 
   ```yaml

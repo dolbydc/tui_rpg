@@ -39,3 +39,26 @@ test("the terminal UI plays in a terminal drawn elsewhere: keys in, frames out",
     await game.close();
   }
 });
+
+test("where the host draws the panels, the terminal UI draws only the story", async () => {
+  let drawn = "";
+  const terminal = new RemoteTerminal((data) => (drawn += data), { columns: 120, rows: 30 });
+  const game = await createGame({ contentDir: DEFAULT_CONTENT_DIR, storage: "memory", sqliteFile: "", llm: "mock", ollamaUrl: "", ollamaModel: "" });
+  const audio = { voice: new VoiceOver(new SilentSpeaker(), NO_CAST, false), music: new MusicPlayer({ enabled: false }) };
+  const app = runTui(game, audio, { stdin: terminal.stdin, stdout: terminal.stdout, sidebar: false });
+  try {
+    await until(() => drawn, /New game/);
+    terminal.input("\r");
+    // Each answer once its question has been asked.
+    for (const [question, answer] of [[/character's name\?/, "Ash"], [/pronouns\?/, "they"], [/points/, "3 3 2 2"], [/Begin with this character\?/, "yes"]] as const) {
+      await until(() => drawn, question);
+      terminal.input(answer + "\r");
+    }
+    await until(() => drawn, /Brackenford Square/);
+    await sleep(100);
+    assert.doesNotMatch(drawn, /Inventory|Quests|Map/);
+  } finally {
+    app.unmount();
+    await game.close();
+  }
+});

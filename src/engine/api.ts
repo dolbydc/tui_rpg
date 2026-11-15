@@ -31,13 +31,16 @@ export interface PersonView {
   /** How they look ("a hunched old man in a sodden wool coat"). */
   appearance: string;
   known: boolean;
-  /** A picture of them (an absolute file path), if the campaign has one. */
+  /** A picture of them (an absolute file path): the campaign's, or a portrait drawn. */
   image?: string;
+  /** A portrait of them is on its way (an event will bring the view with it). */
+  drawing?: boolean;
 }
 
 /** What the player can see and knows of their game: nothing the world keeps hidden from them. */
 export interface PlayerView {
-  place: { id: string; name: string; image?: string };
+  /** `drawing`: a picture of it is on its way (an event will bring the view with it). */
+  place: { id: string; name: string; image?: string; drawing?: boolean };
   /** Who's here with the player. */
   people: PersonView[];
   character: Character;
@@ -79,6 +82,12 @@ export interface TurnOutcome extends TurnResult {
 }
 
 /**
+ * Something the engine says between turns: the game has changed by itself (a picture of the place has been
+ * drawn), or there's something the player should be told (pictures can't be drawn).
+ */
+export type GameEvent = { kind: "view"; view: GameView } | { kind: "notice"; text: string };
+
+/**
  * A game engine, as a frontend drives it: pick a campaign, then send what the player types. One campaign is
  * open at a time; opening another leaves the first saved as it is.
  */
@@ -88,6 +97,8 @@ export interface Game {
   open(campaignId: string, mode: "continue" | "new"): Promise<Opened>;
   /** Everything the player types: actions, speech and /commands. */
   submit(text: string): Promise<TurnOutcome>;
+  /** Hears what the engine says between turns; returns what stops listening. */
+  subscribe(listener: (event: GameEvent) => void): () => void;
   close(): Promise<void>;
 }
 

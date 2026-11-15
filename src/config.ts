@@ -1,4 +1,5 @@
 import path from "node:path";
+import { COMFY_MODELS, type ComfyModel } from "./art/comfy.js";
 import { PLAYERS, type PlayerName } from "./voice/players.js";
 
 /** Where campaigns live, one folder each. */
@@ -6,6 +7,8 @@ export const DEFAULT_CONTENT_DIR = path.resolve(import.meta.dirname, "../content
 /** The Hollow Lantern, which the tests play. */
 export const DEFAULT_CAMPAIGN_DIR = path.join(DEFAULT_CONTENT_DIR, "hollow-lantern");
 export const DEFAULT_SQLITE_FILE = path.resolve(import.meta.dirname, "../data/tui_rpg.db");
+/** Pictures drawn of places, one folder per campaign. */
+export const DEFAULT_ART_DIR = path.resolve(import.meta.dirname, "../data/art");
 
 export interface Config {
   /** The folder of campaigns offered at the start menu. */
@@ -24,6 +27,12 @@ export interface Config {
   music: "on" | "off";
   /** Music volume, 0–1. */
   musicVolume: number;
+  /** A ComfyUI server to draw pictures of places with; without one, places go without. */
+  comfyUrl?: string;
+  /** What ComfyUI draws with. */
+  comfyModel: ComfyModel;
+  /** Where drawn pictures are kept. */
+  artDir: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -38,6 +47,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     player: env.TUI_RPG_PLAYER === undefined ? undefined : oneOf(env.TUI_RPG_PLAYER, PLAYERS, "TUI_RPG_PLAYER"),
     music: oneOf(env.TUI_RPG_MUSIC, ["on", "off"], "TUI_RPG_MUSIC"),
     musicVolume: volume(env.TUI_RPG_MUSIC_VOLUME),
+    ...(env.TUI_RPG_COMFY_URL && { comfyUrl: env.TUI_RPG_COMFY_URL }),
+    comfyModel: oneOf(env.TUI_RPG_COMFY_MODEL, COMFY_MODELS, "TUI_RPG_COMFY_MODEL"),
+    artDir: env.TUI_RPG_ART_DIR ?? DEFAULT_ART_DIR,
   };
 }
 

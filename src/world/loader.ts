@@ -21,7 +21,7 @@ import type {
 
 /**
  * Loads a campaign directory:
- *   world.md            title, starting state (incl. start_time), music, quests with their definition of done and reward
+ *   world.md            title, starting state (incl. start_time), music, art_style, quests with their definition of done and reward
  *                       (frontmatter) and intro (body)
  *   rules.md            narrator tone and rules (body)
  *   locations/<id>.md   name, label and map position (optional), exits, items, hidden_items, arrival_check, music,
@@ -87,6 +87,7 @@ export async function loadWorld(dir: string): Promise<WorldDefinition> {
     intro: unwrap(world.body),
     rules: rules.body,
     ...(world.data.narrator_voice === undefined ? {} : { narratorVoice: str(world.data, "narrator_voice", worldFile) }),
+    ...(world.data.art_style === undefined ? {} : { artStyle: str(world.data, "art_style", worldFile).trim() }),
     ...(world.data.music === undefined ? {} : { music: (await music(world.data, dir, worldFile, false)) ?? undefined }),
     start: {
       locationId: str(world.data, "start", worldFile),

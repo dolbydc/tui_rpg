@@ -4,21 +4,28 @@
 //   → {"id": 1, "method": "open", "params": ["hollow-lantern", "continue"]}
 //   ← {"id": 1, "result": {"lines": [...], "resumed": true, "view": {...}, "cast": {...}}}
 //   ← {"id": 2, "error": {"message": "No campaign \"x\""}}
+//   ← {"event": {"kind": "view", "view": {...}}}
 //
-// Methods are Game's: library(), open(campaignId, mode), submit(text), close().
+// Methods are Game's: library(), open(campaignId, mode), submit(text), close(). Between answers, the engine
+// sends what it has to say of its own accord (Game.subscribe()) as events, which have no id.
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
-import type { Game, Library, Opened, TurnOutcome } from "./api.js";
+import type { Game, GameEvent, Library, Opened, TurnOutcome } from "./api.js";
+
+type Method = "library" | "open" | "submit" | "close";
 
 export interface Request {
   id: number;
-  method: keyof Game;
+  method: Method;
   params: unknown[];
 }
 
 export type Response = { id: number; result: unknown } | { id: number; error: { message: string } };
 
-const METHODS: readonly (keyof Game)[] = ["library", "open", "submit", "close"];
+/** What comes back: an answer to a request, or an event. */
+type Message = Response | { event: GameEvent };
+
+const METHODS: readonly Method[] = ["library", "open", "submit", "close"];
 
 /**
  * Answers requests from `input` on `output` with `game` (or the error it failed to start with), one at a time
@@ -27,7 +34,11 @@ const METHODS: readonly (keyof Game)[] = ["library", "open", "submit", "close"];
 export function serve(game: Promise<Game>, input: Readable, output: Writable): Promise<void> {
   const lines = createInterface({ input, crlfDelay: Infinity });
   let queue = Promise.resolve();
-  const send = (response: Response) => output.write(JSON.stringify(response) + "\n");
+  const send = (message: Message) => {
+    if (output.writable) output.write(JSON.stringify(message) + "\n");
+  };
+  let unsubscribe = () => {};
+  game.then((g) => (unsubscribe = g.subscribe((event) => send({ event }))), () => {});
   return new Promise((resolve) => {
     lines.on("line", (line) => {
       if (!line.trim()) return;
@@ -50,7 +61,12 @@ export function serve(game: Promise<Game>, input: Readable, output: Writable): P
       });
     });
     // Done: answer what's queued, then end the output, which tells the other end there's no more.
-    lines.on("close", () => void queue.then(() => output.end(resolve)));
+    lines.on("close", () =>
+      void queue.then(() => {
+        unsubscribe();
+        output.end(resolve);
+      }),
+    );
   });
 }
 
@@ -58,6 +74,7 @@ export function serve(game: Promise<Game>, input: Readable, output: Writable): P
 export class RemoteGame implements Game {
   private nextId = 1;
   private readonly pending = new Map<number, { resolve: (value: unknown) => void; reject: (err: Error) => void }>();
+  private readonly listeners = new Set<(event: GameEvent) => void>();
   /** Set once the connection is gone: every call fails with it from then on. */
   private broken?: Error;
 
@@ -69,12 +86,17 @@ export class RemoteGame implements Game {
   ) {
     const lines = createInterface({ input, crlfDelay: Infinity });
     lines.on("line", (line) => {
-      let response: Response;
+      let message: Message;
       try {
-        response = JSON.parse(line) as Response;
+        message = JSON.parse(line) as Message;
       } catch {
         return; // not for us: a stray line of output
       }
+      if ("event" in message) {
+        for (const listener of this.listeners) listener(message.event);
+        return;
+      }
+      const response = message;
       const call = this.pending.get(response.id);
       if (!call) return;
       this.pending.delete(response.id);
@@ -91,7 +113,7 @@ export class RemoteGame implements Game {
     this.pending.clear();
   }
 
-  private call<T>(method: keyof Game, ...params: unknown[]): Promise<T> {
+  private call<T>(method: Method, ...params: unknown[]): Promise<T> {
     if (this.broken) return Promise.reject(this.broken);
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
@@ -110,6 +132,11 @@ export class RemoteGame implements Game {
 
   submit(text: string): Promise<TurnOutcome> {
     return this.call("submit", text);
+  }
+
+  subscribe(listener: (event: GameEvent) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
   }
 
   async close(): Promise<void> {

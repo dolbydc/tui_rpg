@@ -11,15 +11,47 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <!-- Pictures of the place and the people there; shown only when the campaign has some. -->
-    <aside id="art" hidden>
-      <figure id="place" hidden>
-        <img alt="" />
-        <figcaption></figcaption>
-      </figure>
-      <ul id="people"></ul>
+    <div id="story">
+      <!-- The picture of the place, when there is one (or one on its way). -->
+      <section id="scene" hidden>
+        <img id="scene-image" alt="" />
+        <div id="scene-caption">
+          <h1 id="scene-name"></h1>
+          <span id="scene-drawing">drawing…</span>
+        </div>
+        <!-- Portraits of who's here, over the picture. -->
+        <ul id="scene-people"></ul>
+      </section>
+      <!-- The story and the input line: the terminal UI, without its sidebar. -->
+      <main id="terminal"></main>
+    </div>
+    <!-- The rest of the game, as panels; shown once there's a game. -->
+    <aside id="sidebar" hidden>
+      <section class="panel" id="map-panel" title="Open the map">
+        <h2>Map <span id="map-level" class="muted"></span><span class="hint">click to open</span></h2>
+        <svg id="map" role="img" aria-label="Map of the places you've been"></svg>
+      </section>
+      <section class="panel" id="character"></section>
+      <section class="panel" id="people-panel">
+        <h2>Here</h2>
+        <ul id="people"></ul>
+      </section>
+      <section class="panel">
+        <h2>Inventory</h2>
+        <ul id="inventory" class="list"></ul>
+      </section>
+      <section class="panel">
+        <h2>Quests</h2>
+        <ul id="quests" class="list"></ul>
+      </section>
     </aside>
-    <main id="terminal"></main>
+    <!-- The whole level's map, opened from the panel; a click or Esc closes it. -->
+    <div id="map-overlay" hidden>
+      <div class="map-sheet">
+        <h2>Map <span id="full-map-level" class="muted"></span><span class="hint">click or Esc to close</span></h2>
+        <svg id="full-map" role="img" aria-label="Map of the places you've been"></svg>
+      </div>
+    </div>
     <script type="module" src="renderer.js"></script>
   </body>
 </html>

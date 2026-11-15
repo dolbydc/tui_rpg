@@ -3,6 +3,8 @@ title: The Hollow Lantern
 start: village-square
 # The intro is set at night: "Tonight it finally lets up".
 start_time: "20:00"
+# How pictures of its places are drawn, in a frontend that draws them (the Electron window, with ComfyUI).
+art_style: "Painterly dark-fantasy concept art: moody, rich textures, soft volumetric light, muted earthy colours with warm lamplight."
 # Kokoro text-to-speech voice for narration (see README for the list).
 narrator_voice: bm_george
 character:

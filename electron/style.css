@@ -1,9 +1,16 @@
 :root {
   --bg: #16161e;
-  --panel: #1f2030;
+  --panel: #1d1e2c;
+  --panel-border: #2a2c40;
   --text: #c0caf5;
   --muted: #7a82a8;
-  --border: #2f3349;
+  --faint: #3b3f5c;
+  --accent: #7dcfff;
+  --player: #e0af68;
+  --good: #9ece6a;
+  --bad: #f7768e;
+  --drive: #bb9af7;
+  --sidebar: 320px;
   color-scheme: dark;
 }
 
@@ -17,7 +24,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 14px/1.4 system-ui, sans-serif;
+  font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
   overflow: hidden;
 }
 
@@ -25,69 +32,569 @@ body {
   display: flex;
 }
 
-#terminal {
-  flex: 1;
-  min-width: 0;
-  padding: 8px;
+[hidden] {
+  display: none !important;
 }
 
-#art {
-  width: min(34vw, 420px);
-  flex-shrink: 0;
-  overflow-y: auto;
-  padding: 12px;
-  border-right: 1px solid var(--border);
-  background: var(--panel);
+.muted {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+/* --- The picture over the story ------------------------------------------------------------- */
+
+#story {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
+}
+
+#scene {
+  position: relative;
+  flex: 0 0 auto;
+  height: clamp(220px, 60vh, 760px);
+  background: #11121a;
+  overflow: hidden;
+}
+
+#scene-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: opacity 0.6s ease;
+}
+
+#scene.drawing #scene-image {
+  opacity: 0;
+}
+
+/* Waiting for its picture: a gently moving sheen where it will be. */
+#scene.drawing::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, #1b1c2a 30%, #262840 50%, #1b1c2a 70%);
+  background-size: 200% 100%;
+  animation: sheen 1.8s linear infinite;
+}
+
+@keyframes sheen {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+#scene-caption {
+  position: absolute;
+  inset: auto 0 0 0;
+  padding: 40px 20px 14px;
+  background: linear-gradient(transparent, rgb(10 11 18 / 0.85));
+  display: flex;
+  align-items: baseline;
   gap: 12px;
 }
 
-#art[hidden],
-#place[hidden] {
+#scene-name {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.6);
+}
+
+#scene-drawing {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+#scene:not(.drawing) #scene-drawing {
   display: none;
 }
 
-figure {
+#terminal {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* The padding goes on xterm's own element: the fit addon takes that off the space it fills. On the
+   container, it was counted as room for rows, and the last row (the input line) fell off the bottom. */
+#terminal .xterm {
+  height: 100%;
+  padding: 6px 8px;
+}
+
+/* xterm's I-beam pointer is a thin dark line, all but invisible on a dark page (under WSLg especially). */
+#terminal .xterm,
+#terminal .xterm-screen,
+#terminal .xterm-viewport {
+  cursor: default;
+}
+
+/* --- Panels down the side ------------------------------------------------------------------- */
+
+#sidebar {
+  width: var(--sidebar);
+  flex-shrink: 0;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #13131b;
+  border-left: 1px solid var(--panel-border);
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.panel h2 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.list {
+  list-style: none;
   margin: 0;
+  padding: 0;
 }
 
-#place img {
-  width: 100%;
-  aspect-ratio: 4 / 3;
-  object-fit: cover;
-  border-radius: 6px;
+.list li {
+  padding: 3px 0;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.list li:last-child {
+  border-bottom: none;
+}
+
+.list .empty {
+  color: var(--muted);
+  border: none;
+}
+
+#quests li.done {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+#quests li::before {
+  content: "•";
+  color: var(--accent);
+  margin-right: 8px;
+}
+
+#quests li.done::before {
+  content: "✓";
+  color: var(--good);
+}
+
+/* Map: each place a card with its picture, joined by trails; where you are glows. */
+
+#map-panel {
+  cursor: pointer;
+}
+
+#map-panel:hover {
+  border-color: #3a3e5c;
+}
+
+.hint {
+  float: right;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+#map-panel:hover .hint,
+#map-overlay .hint {
+  opacity: 1;
+}
+
+#map,
+#full-map {
   display: block;
+  margin: 0 auto;
+  max-width: 100%;
+  height: auto;
 }
 
-figcaption {
-  margin-top: 6px;
-  font-weight: 600;
+.map-ground {
+  fill: #151622;
 }
+
+.map-grid {
+  fill: #262840;
+}
+
+.trail {
+  stroke: #33364f;
+  stroke-width: 10;
+  stroke-linecap: round;
+}
+
+.trail-line {
+  stroke: #5a5f85;
+  stroke-width: 2;
+  stroke-dasharray: 6 8;
+  stroke-linecap: round;
+}
+
+.trail.stub,
+.trail-line.stub {
+  opacity: 0.55;
+}
+
+.unknown {
+  fill: #1d1e2c;
+  stroke: #4a4e70;
+  stroke-width: 2;
+  stroke-dasharray: 4 4;
+}
+
+.unknown-mark {
+  fill: var(--muted);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.card-bg {
+  fill: #262840;
+}
+
+.card-art-blank {
+  fill: url(#blank-art);
+}
+
+.card-strip {
+  fill: rgb(14 15 24 / 0.88);
+}
+
+.card-frame {
+  fill: none;
+  stroke: #3b3f5c;
+  stroke-width: 2;
+}
+
+.here .card-frame {
+  stroke: var(--accent);
+  stroke-width: 4;
+}
+
+.here-glow {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 10;
+  opacity: 0.25;
+  animation: glow 2.4s ease-in-out infinite;
+}
+
+@keyframes glow {
+  50% {
+    opacity: 0.08;
+  }
+}
+
+.card-label {
+  fill: var(--muted);
+  font-size: 17px;
+  font-family: system-ui, sans-serif;
+  text-anchor: middle;
+}
+
+.here .card-label {
+  fill: var(--text);
+  font-weight: 700;
+}
+
+.badge {
+  fill: rgb(14 15 24 / 0.85);
+}
+
+.badge-text {
+  font: 700 15px system-ui, sans-serif;
+  text-anchor: middle;
+  fill: var(--accent);
+}
+
+.badge-text.me {
+  fill: var(--player);
+}
+
+.item-dot {
+  fill: var(--good);
+  stroke: rgb(14 15 24 / 0.9);
+  stroke-width: 2;
+}
+
+.stairs-text {
+  font: 700 14px system-ui, sans-serif;
+  fill: var(--player);
+  text-anchor: middle;
+}
+
+/* The map opened full-size */
+
+#map-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  background: rgb(8 9 14 / 0.82);
+  backdrop-filter: blur(3px);
+  cursor: pointer;
+}
+
+.map-sheet {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  padding: 16px 20px 20px;
+  max-width: calc(100vw - 64px);
+  max-height: calc(100vh - 64px);
+  display: flex;
+  flex-direction: column;
+}
+
+.map-sheet h2 {
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+#full-map {
+  max-height: calc(100vh - 140px);
+  width: auto;
+}
+
+/* Character */
+
+.who {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.who strong {
+  font-size: 16px;
+  color: var(--accent);
+}
+
+.meter {
+  display: grid;
+  grid-template-columns: 52px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+  font-size: 12px;
+}
+
+.meter .bar {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--faint);
+  overflow: hidden;
+}
+
+.meter .fill {
+  height: 100%;
+  border-radius: 4px;
+  background: var(--good);
+}
+
+.meter.hp.low .fill {
+  background: var(--bad);
+}
+
+.meter.xp .fill {
+  background: var(--accent);
+}
+
+.meter .value {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.chip {
+  display: inline-block;
+  margin: 2px 0 6px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  background: rgb(224 175 104 / 0.15);
+  color: var(--player);
+  border: 1px solid rgb(224 175 104 / 0.4);
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 12px;
+  margin: 10px 0;
+  padding: 8px 0;
+  border-top: 1px solid var(--panel-border);
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.stat {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.stat .name {
+  flex: 1;
+  text-transform: capitalize;
+}
+
+.stat .value {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat .bonus {
+  color: var(--muted);
+  font-size: 12px;
+  width: 22px;
+  text-align: right;
+}
+
+.turn {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px 12px;
+  font-size: 12px;
+}
+
+.turn .label {
+  color: var(--muted);
+  margin-right: 4px;
+}
+
+.pips {
+  letter-spacing: 2px;
+}
+
+.pips .on.action {
+  color: var(--good);
+}
+
+.pips .on.drive {
+  color: var(--drive);
+}
+
+.pips .off {
+  color: var(--faint);
+}
+
+/* Who's here */
 
 #people {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 10px;
 }
 
-#people img {
-  width: 100%;
-  aspect-ratio: 3 / 4;
+#people li {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 12px;
+  align-items: center;
+}
+
+.portrait {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
   object-fit: cover;
-  border-radius: 6px;
-  display: block;
+  object-position: center 20%;
+  background: #2a2c40;
+  border: 2px solid var(--panel-border);
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 20px;
+  color: var(--muted);
+}
+
+.portrait.drawing {
+  background: linear-gradient(110deg, #23253a 30%, #31345a 50%, #23253a 70%);
+  background-size: 200% 100%;
+  animation: sheen 1.6s linear infinite;
 }
 
 #people .label {
-  margin-top: 4px;
   font-weight: 600;
 }
 
 #people .appearance {
   color: var(--muted);
   font-size: 12px;
+}
+
+/* Portraits over the scene's picture */
+
+#scene-people {
+  position: absolute;
+  right: 16px;
+  bottom: 14px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  gap: 12px;
+}
+
+#scene-people li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 92px;
+}
+
+#scene-people .portrait {
+  width: 84px;
+  height: 84px;
+  border: 2px solid rgb(192 202 245 / 0.5);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.5);
+}
+
+#scene-people .name {
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.9);
+  line-height: 1.2;
+}
+
+/* Ink redraws the whole screen in place, so there's never anything to scroll back to: no scrollbar. */
+#terminal .xterm-viewport {
+  overflow-y: hidden !important;
+}
+
+#terminal .xterm .scrollbar {
+  display: none !important;
 }
