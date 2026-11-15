@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Box, renderToString } from "ink";
-import type { LogLine } from "../domain/types.js";
+import type { LogLine } from "../engine/api.js";
 import { DialogueLog, InputLine, Inventory } from "./panels.js";
 
 const PROSE =

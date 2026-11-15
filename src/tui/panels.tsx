@@ -1,9 +1,6 @@
 import { Box, Text, Transform, type TextProps } from "ink";
-import type { Character, LogLine, MapView, Quest } from "../domain/types.js";
-import type { PlayerStatus } from "../game/session.js";
+import { clock, formatBonus, statBonus, type Character, type LogLine, type MapView, type PlayerStatus, type Quest } from "../engine/api.js";
 import type { LineState } from "./line-editor.js";
-import { formatBonus, statBonus } from "../world/checks.js";
-import { clock } from "../world/time.js";
 import { cellsAcross, renderMap, type Glyph, type GlyphStyle } from "./map-grid.js";
 
 const LOG_LIMIT = 60;
@@ -188,8 +185,8 @@ export function Inventory({ items }: { items: string[] }) {
 export function QuestLog({ quests }: { quests: Quest[] }) {
   return (
     <Panel title="Quests">
-      {quests.some((q) => q.status !== "pending") ? (
-        quests.filter((q) => q.status !== "pending").map((quest) => (
+      {quests.length ? (
+        quests.map((quest) => (
           <Text key={quest.id} dimColor={quest.status === "completed"}>
             {quest.status === "completed" ? "✓" : "•"} {quest.title}
           </Text>

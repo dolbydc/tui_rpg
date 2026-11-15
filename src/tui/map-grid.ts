@@ -1,4 +1,4 @@
-import type { GridPosition, MapCell, MapView } from "../domain/types.js";
+import type { GridPosition, MapCell, MapView } from "../engine/api.js";
 
 /** How a map character is drawn; see MAP_STYLES in panels.tsx. */
 export type GlyphStyle = "border" | "here" | "link" | "label" | "hereLabel" | "player" | "person" | "item" | "stairs";

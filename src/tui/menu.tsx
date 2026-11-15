@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Box, Text, useInput } from "ink";
-import type { CampaignInfo } from "../game/campaigns.js";
-import type { SaveSummary } from "../storage/store.js";
+import type { CampaignSummary, SaveSummary } from "../engine/api.js";
 
 /** What a menu entry does. */
 export type MenuChoice = { kind: "continue"; campaignId: string } | { kind: "new"; campaignId: string } | { kind: "quit" };
@@ -15,7 +14,7 @@ export interface MenuItem {
 }
 
 /** Saved games first, most recent first; then a new game of each campaign; then quit. */
-export function menuItems(campaigns: CampaignInfo[], saves: SaveSummary[], now = new Date()): MenuItem[] {
+export function menuItems(campaigns: CampaignSummary[], saves: SaveSummary[], now = new Date()): MenuItem[] {
   const title = (id: string) => campaigns.find((c) => c.id === id)?.title ?? id;
   return [
     ...saves.map(

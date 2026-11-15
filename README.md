@@ -20,6 +20,13 @@ npm run dev       # run from source
 Or `npm run build && npm start`. `npm test` runs the tests (no Ollama needed),
 `npm run typecheck` checks types.
 
+**In a window.** `npm run electron` plays the same game in an [Electron](https://www.electronjs.org)
+window: the terminal UI drawn by [xterm.js](https://xtermjs.org), with pictures of the place and the
+people there beside it when the campaign has them (`image`, below). The first run downloads Electron
+(`install-electron`). The engine runs in a Node.js process of its own, started with the `node` on the
+`PATH` (`TUI_RPG_NODE` picks another): its SQLite module is built for Node, not Electron. Under WSL the
+window opens through WSLg; if it doesn't, try `npm run electron -- --ozone-platform=wayland`.
+
 **Start menu.** The game opens on a menu: carry on a saved game, or start a new game of any campaign
 in `content/` (↑↓ or a number to choose, Enter to start, Esc to quit). Each campaign has its own save,
 so starting one doesn't touch another's; starting a new game of a campaign you've saved replaces that
@@ -151,11 +158,29 @@ a box's border marks stairs up or down.
 | `TUI_RPG_PLAYER` | per system | `paplay`, `pw-play`, `aplay`, `afplay` or `powershell`: what plays the audio |
 | `TUI_RPG_MUSIC` | `on` | `off` starts with the music off (`/music on` turns it on) |
 | `TUI_RPG_MUSIC_VOLUME` | `0.4` | music volume, 0–1 (`aplay` plays at full volume) |
+| `TUI_RPG_NODE` | `node` | the Node.js the Electron window runs the engine with |
 
 ## Architecture
 
+The game engine and its frontends meet at one contract, `Game` in `src/engine/api.ts`: list the
+campaigns and saves, open one, and submit what the player types; each answer carries a `GameView` of
+what the player can see (never what's hidden from them: NPCs' names they haven't learned, personas,
+knowledge, hidden quests). It's all plain data, so a frontend can run the engine in its own process
+(`LocalGame`) or talk to it in another (`RemoteGame`) over the engine host's stdin and stdout, one JSON
+message a line (`src/engine/protocol.ts`; `npm run engine` starts one). Frontends import from
+`engine/api.ts` only, never the engine's internals.
+
 ```
-tui/          Terminal UI: start menu; dialogue log, map, character sheet and turn, inventory, quest log, input
+index.tsx     The terminal game: the engine in-process (engine/create.ts), drawn in this terminal
+electron/     The window (src/electron, page in electron/): the engine in a child process
+  │           (engine/spawn.ts → engine/host.ts), the terminal UI drawn by xterm.js, pictures beside it
+  │
+tui/          Terminal UI over a Game: start menu; dialogue log, map, character sheet and turn, inventory,
+  │           quest log, input. Draws in this process's terminal, or any other (tui/terminal.ts)
+voice/        Speaker interface: Kokoro text-to-speech; turns log lines into who says what (by the Cast
+  │           the engine gives); mood music. Frontends own audio: /voice and /music just ask them
+  │
+engine/       The contract (api.ts); LocalGame over the session; the host, its protocol and RemoteGame
   │
 game/         Campaign library (what's in content/, and its saves); session controller: commands, the
   │           turn pipeline, save/load
@@ -166,11 +191,12 @@ game/         Campaign library (what's in content/, and its saves); session cont
   │     │
   │   llm/        LlmProvider interface: Ollama, plus a mock for tests
   └── storage/    CampaignStore interface: SQLite, plus in-memory
-voice/        Speaker interface: Kokoro text-to-speech; turns log lines into who says what
 
 domain/       Shared types; depends on nothing
-index.tsx     Composition root: the only place that picks implementations
 ```
+
+`engine/create.ts` is the only place that picks the engine's implementations (storage, model), and
+`voice/audio.ts` the frontends' audio.
 
 Each player action runs the same explicit pipeline in `SessionController`:
 
@@ -226,6 +252,10 @@ name is its id, and its save's. (Saves from before the menu, under the id `defau
   player roll on first arriving (`why` reads after "trying to").
   Optional `music` plays here instead of the world's (`music: none` is silence). A music file
   that isn't there stops the campaign loading.
+  Optional `image` (e.g. `image: art/square.png`, from the campaign folder) is a picture of the place,
+  shown beside the game in the Electron window while the player is there; the terminal ignores it. An
+  NPC's file can have one too, shown while they're with the player. Like music, a missing file stops
+  the campaign loading.
   `hidden_items` are items not visible until the player searches (`/search [where]`, or "I look
   behind the crates", "I dig…"); searching costs an action, and a found item lies in plain sight to
   be taken. Each is a name, or:

@@ -69,6 +69,8 @@ export interface LocationDef {
   enterCheck?: CheckRequest;
   /** Mood music here instead of the world's (an audio file's path), or null for silence. */
   music?: string | null;
+  /** A picture of the place (an image file's path), for frontends that show one. */
+  image?: string;
 }
 
 /** Something not immediately visible: buried, behind something, hidden with magic… */
@@ -102,6 +104,8 @@ export interface NpcDef {
   pronouns: string;
   /** Text-to-speech voice for what they say (a Kokoro voice name); picked from their pronouns if not set. */
   voice?: string;
+  /** A picture of them (an image file's path), for frontends that show one. */
+  image?: string;
   /** Where the NPC is when they have no routine. */
   locationId: string;
   /** Location ids cycled through, one per turn (turn n → routine[n % length]). */

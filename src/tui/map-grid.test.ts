@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { MapView } from "../domain/types.js";
+import type { MapView } from "../engine/api.js";
 import { cellsAcross, renderMap } from "./map-grid.js";
 
 const text = (view: Omit<MapView, "level">, cols = 3, rows = 2) => renderMap({ level: 0, ...view }, cols, rows).map((row) => row.map((g) => g.ch).join(""));

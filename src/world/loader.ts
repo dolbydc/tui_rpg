@@ -24,11 +24,11 @@ import type {
  *   world.md            title, starting state (incl. start_time), music, quests with their definition of done and reward
  *                       (frontmatter) and intro (body)
  *   rules.md            narrator tone and rules (body)
- *   locations/<id>.md   name, label and map position (optional), exits, items, hidden_items, arrival_check, music
- *                       (frontmatter) and description (body)
- * Music is an audio file's path, from the campaign directory; a location's `music: none` is silence.
- *   npcs/<id>.md        name, epithet, appearance, pronouns, voice, speech, location, routine, perception, discretion,
- *                       goals, knowledge, trusts (frontmatter) and persona (body)
+ *   locations/<id>.md   name, label and map position (optional), exits, items, hidden_items, arrival_check, music,
+ *                       image (frontmatter) and description (body)
+ *   npcs/<id>.md        name, epithet, appearance, pronouns, voice, speech, image, location, routine, perception,
+ *                       discretion, goals, knowledge, trusts (frontmatter) and persona (body)
+ * Music and images are files' paths, from the campaign directory; a location's `music: none` is silence.
  */
 export async function loadWorld(dir: string): Promise<WorldDefinition> {
   const worldFile = path.join(dir, "world.md");
@@ -53,6 +53,7 @@ export async function loadWorld(dir: string): Promise<WorldDefinition> {
       hiddenItems: hiddenItems(doc.data.hidden_items ?? [], file),
       ...(doc.data.arrival_check === undefined ? {} : { enterCheck: checkRequest(doc.data.arrival_check, file) }),
       ...(doc.data.music === undefined ? {} : { music: await music(doc.data, dir, file) }),
+      ...(doc.data.image === undefined ? {} : { image: await asset(doc.data, "image", dir, file) }),
     });
   }
 
@@ -67,6 +68,7 @@ export async function loadWorld(dir: string): Promise<WorldDefinition> {
       pronouns: data.pronouns === undefined ? "they/them" : str(data, "pronouns", file),
       ...(data.voice === undefined ? {} : { voice: str(data, "voice", file) }),
       ...(data.speech === undefined ? {} : { speech: str(data, "speech", file).trim() }),
+      ...(data.image === undefined ? {} : { image: await asset(data, "image", dir, file) }),
       locationId: str(data, "location", file),
       routine: data.routine === undefined ? undefined : strList(data.routine, "routine", file),
       persona: unwrap(doc.body),
@@ -200,11 +202,16 @@ function character(value: unknown, file: string): Character {
 /** A roll made on first arriving somewhere, e.g. `{stat: wits, why: keep your nerve among the hanged men}`. */
 /** The audio file `music` names, from the campaign directory; "none" (where `silence` is allowed) is null. */
 async function music(data: Record<string, unknown>, dir: string, file: string, silence = true): Promise<string | null> {
-  const value = str(data, "music", file);
-  if (silence && value === "none") return null;
+  if (silence && data.music === "none") return null;
+  return asset(data, "music", dir, file);
+}
+
+/** The file `key` names (music, an image), from the campaign directory, as an absolute path; it must be there. */
+async function asset(data: Record<string, unknown>, key: string, dir: string, file: string): Promise<string> {
+  const value = str(data, key, file);
   const resolved = path.resolve(dir, value);
   await access(resolved).catch(() => {
-    throw new Error(`${file}: music file "${value}" isn't there (it's looked for from ${dir})`);
+    throw new Error(`${file}: ${key} file "${value}" isn't there (it's looked for from ${dir})`);
   });
   return resolved;
 }

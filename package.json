@@ -10,6 +10,8 @@
     "dev": "tsx src/index.tsx",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
+    "electron": "npm run build && install-electron && electron dist/electron/main.js",
+    "engine": "tsx src/engine/host.ts",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test \"src/**/*.test.{ts,tsx}\""
   },
@@ -17,6 +19,8 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "better-sqlite3": "^12.11.1",
     "ink": "^8.0.0",
     "kokoro-js": "^1.2.1",
@@ -27,7 +31,9 @@
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.6.4",
     "@types/react": "^19.3.0",
+    "electron": "^45.3.2",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
-  }
+  },
+  "main": "dist/electron/main.js"
 }

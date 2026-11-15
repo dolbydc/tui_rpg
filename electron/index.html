@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src file: data:; font-src file: data:"
+    />
+    <title>TUI RPG</title>
+    <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <!-- Pictures of the place and the people there; shown only when the campaign has some. -->
+    <aside id="art" hidden>
+      <figure id="place" hidden>
+        <img alt="" />
+        <figcaption></figcaption>
+      </figure>
+      <ul id="people"></ul>
+    </aside>
+    <main id="terminal"></main>
+    <script type="module" src="renderer.js"></script>
+  </body>
+</html>

@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { DEFAULT_CAMPAIGN_DIR } from "../config.js";
+import { castOf } from "../engine/local.js";
 import { loadWorld } from "../world/loader.js";
 import { LINE_PAUSE, sentences, trimSilence } from "./kokoro.js";
 import type { Speaker, Utterance } from "./speaker.js";
 import { VoiceOver, voiceScript } from "./voice-over.js";
 
-const world = await loadWorld(DEFAULT_CAMPAIGN_DIR);
+const world = castOf(await loadWorld(DEFAULT_CAMPAIGN_DIR));
 
 test("narration in the narrator's voice; an NPC's speech in theirs, with their actions narrated", () => {
   const script = voiceScript(
@@ -34,8 +35,8 @@ test("a scene's heading, the place's name, is shown but not read out", () => {
 });
 
 test("an NPC without a voice gets one to match their pronouns", () => {
-  const npcs = new Map([["x", { ...world.npcs.get("marta")!, id: "x", voice: undefined, pronouns: "he/him" }]]);
-  assert.deepEqual(voiceScript([{ kind: "npc", npcId: "x", text: "Hm." }], { npcs }), [{ text: "Hm.", voice: "bm_daniel" }]);
+  const npcs = { x: { pronouns: "he/him" } };
+  assert.deepEqual(voiceScript([{ kind: "npc", npcId: "x", text: "Hm." }], { npcs, places: [] }), [{ text: "Hm.", voice: "bm_daniel" }]);
 });
 
 test("long text is read a sentence at a time", () => {
