@@ -1,7 +1,7 @@
 ---
 name: Brother Sallow
 epithet: the preacher
-appearance: a gaunt figure in patched coveralls with a lined circle painted on their forehead, sitting perfectly still among dead plants
+appearance: person of Japanese decent, a gaunt figure in patched coveralls with a lined circle painted on their forehead, sitting perfectly still among dead plants
 pronouns: they/them
 voice: jf_tebukuro
 speech: >-

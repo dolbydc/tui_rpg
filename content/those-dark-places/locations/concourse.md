@@ -14,4 +14,4 @@ The station's main thoroughfare, a long curving corridor of scuffed deck plate u
 dimmed for the night cycle. Workers in grey coveralls shuffle between shifts without looking up.
 Someone has scratched a circle with a line through it into a bulkhead, over and over. A lift
 cage clanks down to ore processing; a stairwell climbs to administration. The canteen and the old
-hydroponics bay open off to either side.
+hydroponics bay open off to either side. The hydroponics bay is full of dead plants that have been left to rot.

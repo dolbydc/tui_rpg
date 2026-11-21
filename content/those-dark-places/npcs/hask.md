@@ -1,7 +1,7 @@
 ---
 name: Administrator Hask
 epithet: the administrator
-appearance: a thin, immaculately pressed man in a Combine suit, with a smile that never reaches his eyes
+appearance: a thin hispanic male, immaculately pressed man in a Combine suit, with a smile that never reaches his eyes
 pronouns: he/him
 voice: em_alex
 speech: >-
