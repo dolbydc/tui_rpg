@@ -45,3 +45,57 @@ for (const sidebar of [false, true]) {
     }
   });
 }
+
+test("the story scrolls back with PgUp and ↑ (several in one chunk, as the wheel sends them), and forward again", async () => {
+  const rows = 14;
+  let drawn = "";
+  const terminal = new RemoteTerminal((data) => (drawn += data), { columns: 100, rows });
+  const game = await createGame({ contentDir: DEFAULT_CONTENT_DIR, storage: "memory", sqliteFile: "", llm: "mock", ollamaUrl: "", ollamaModel: "" });
+  await game.open("hollow-lantern", "new");
+  for (const answer of ["Ash", "they", "3 3 2 2"]) await game.submit(answer);
+  const opened = { lines: (await game.submit("yes")).lines, resumed: false, view: (await game.submit("/look")).view, cast: NO_CAST };
+  const audio = { voice: new VoiceOver(new SilentSpeaker(), NO_CAST, false), music: new MusicPlayer({ enabled: false }) };
+  const app = render(<App game={game} opened={opened} {...audio} onMenu={() => {}} sidebar={false} />, {
+    stdin: terminal.stdin,
+    stdout: terminal.stdout,
+    patchConsole: false,
+    debug: true,
+  });
+  const frame = () => strip(drawn).split("\n").slice(-(rows - 1)).join("\n");
+  const press = async (keys: string) => {
+    terminal.input(keys);
+    await sleep(150);
+  };
+  try {
+    await sleep(200);
+    await press("/inventory\r");
+    await press("/look\r");
+    await sleep(100);
+    assert.match(frame(), /> \/look/, "follows the newest");
+    assert.doesNotMatch(frame(), /more line/);
+
+    await press("\x1b[5~"); // PgUp
+    assert.doesNotMatch(frame(), /> \/look/, "the newest has scrolled out of view");
+    assert.match(frame(), /↓ \d+ more lines/, "says there's more below");
+    const back = Number(/↓ (\d+) more/.exec(frame())![1]);
+
+    await press("\x1b[A\x1b[A\x1b[A");
+    assert.equal(Number(/↓ (\d+) more/.exec(frame())![1]), back + 3, "↑ scrolls back a row each");
+
+    await press("\x1b[5~".repeat(20)); // to the top, and no further
+    assert.match(frame(), /you reach Brackenford/, "the opening shows");
+    assert.match(frame(), /The Hollow Lantern · Brackenford Square/, "under the title, which stays put");
+
+    await press("\x1b[6~".repeat(20)); // PgDn, past the end
+    assert.match(frame(), /> \/look/, "back to the newest");
+    assert.doesNotMatch(frame(), /more line/);
+
+    await press("\x1b[5~");
+    await press("/look\r");
+    await sleep(100);
+    assert.doesNotMatch(frame(), /more line/, "a turn taken goes back to the newest");
+  } finally {
+    app.unmount();
+    await game.close();
+  }
+});

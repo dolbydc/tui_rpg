@@ -258,3 +258,77 @@ test("on a journey, NPCs notice the player passing through where they are; a sne
   const botched = texts(travel(sneak, fixedDice(1, 1)).memories, "old-pell");
   assert.ok(botched.some((t) => caught.test(t)), "a failure: caught sneaking");
 });
+
+test("a companion goes wherever the player goes, whatever their routine, until left somewhere", async () => {
+  const { world } = await setup();
+  let state = play(world, world.newGame("t"), { kind: "lead", npc: "the old man" }).after;
+  assert.deepEqual(state.companions, ["old-pell"]);
+  assert.deepEqual(world.scene(state).companions, ["old-pell"]);
+
+  // Off into the woods, where his routine never goes, and on through turns that would take him to the inn.
+  const into = play(world, state, { kind: "move", direction: "east" });
+  state = into.after;
+  assert.deepEqual(world.npcsAt("forest-edge", state).map((n) => n.id), ["old-pell"]);
+  assert.deepEqual(world.npcMovements(into.before, state), [], "coming along isn't announced as an arrival");
+  for (let i = 0; i < 6; i++) state = play(world, state, { kind: "wait" }).after;
+  assert.equal(world.npcLocation(pellOf(world), state), "forest-edge");
+
+  // Told to wait here, he stays, routine or not, when the player goes back.
+  state = play(world, state, { kind: "dismiss", npc: "the old man" }).after;
+  assert.deepEqual(state.companions, []);
+  state = play(world, state, { kind: "move", direction: "west" }).after;
+  for (let i = 0; i < 3; i++) state = play(world, state, { kind: "wait" }).after;
+  assert.equal(world.npcLocation(pellOf(world), state), "forest-edge");
+  assert.deepEqual(world.npcsAt("village-square", state), []);
+});
+
+test("a companion can be sent somewhere, and is seen leaving for it", async () => {
+  const { world } = await setup();
+  const state = play(world, world.newGame("t"), { kind: "lead", npc: "the old man" }).after;
+  const sent = play(world, state, { kind: "dismiss", npc: "the old man", to: "the inn" });
+  assert.equal(world.npcLocation(pellOf(world), sent.after), "hollow-lantern-inn");
+  assert.deepEqual(world.npcMovements(sent.before, sent.after).map((m) => `${m.npc.id}:${m.kind}:${m.to}`), [
+    "old-pell:left:hollow-lantern-inn",
+  ]);
+});
+
+test("only someone here can be asked along, and only a companion parted from", async () => {
+  const { world } = await setup();
+  const start = world.newGame("t");
+  assert.deepEqual(world.resolve({ kind: "lead", npc: "Marta" }, start), { ok: false, reason: `There's nobody called "Marta" here.` });
+  assert.deepEqual(world.resolve({ kind: "dismiss", npc: "the old man" }, start), { ok: false, reason: `Nobody called "the old man" is with you.` });
+  const along = play(world, start, { kind: "lead", npc: "the old man" }).after;
+  assert.deepEqual(world.resolve({ kind: "lead", npc: "the old man" }, along), { ok: false, reason: "The old man is already with you." });
+  assert.deepEqual(world.resolve({ kind: "dismiss", npc: "the old man", to: "the moon" }, along), {
+    ok: false,
+    reason: `There's no "the moon" to send them to.`,
+  });
+});
+
+test("a companion remembers joining, the way they travelled together, and parting; they don't 'see the player leave'", async () => {
+  const { world } = await setup();
+  const joined = play(world, world.newGame("t"), { kind: "lead", npc: "the old man" });
+  const moved = play(world, joined.after, { kind: "move", direction: "east" });
+  const parted = play(world, moved.after, { kind: "dismiss", npc: "the old man" });
+  assert.deepEqual(
+    [joined, moved, parted].flatMap((turn) => texts(observe(world, turn), "old-pell")),
+    [
+      "Agreed to go along with the stranger, wherever they go.",
+      "Went with the stranger from Brackenford Square to Edge of the Thornwood.",
+      "Parted from the stranger at Edge of the Thornwood, to stay there.",
+    ],
+  );
+});
+
+test("NPCs gossip where the player is first, a companion and whoever they're brought to before anyone else", async () => {
+  const { world, pell, marta } = await setup();
+  // Turn 1: Pell is in the square and Marta at the inn. Brought to the inn, Pell and Marta are the pair.
+  let state = play(world, world.newGame("t"), { kind: "lead", npc: "the old man" }).after;
+  state = play(world, state, { kind: "move", direction: "inn" }).after;
+  const candidate = findExchange(world, [], state);
+  assert.deepEqual([[candidate?.a.id, candidate?.b.id].sort(), candidate?.locationId], [[marta.id, pell.id], "hollow-lantern-inn"]);
+});
+
+function pellOf(world: WorldEngine) {
+  return world.npc("old-pell");
+}

@@ -1,6 +1,6 @@
 import type { Character, CheckResult, Intent, LocationDef, Quest, LogLine, NpcDef, NpcMovement, Resolved, SceneView, WorldEvent } from "../domain/types.js";
 import { DRIVE_PER_QUEST } from "../world/checks.js";
-import { clock, describeTime } from "../world/time.js";
+import { clock, describeSpan, describeTime } from "../world/time.js";
 import { bareItem, escapeRegExp, nameForms, withArticle } from "../world/engine.js";
 
 /** How the player refers to an NPC: by name once they know it, otherwise by epithet ("the old man"). */
@@ -70,12 +70,59 @@ export function describeScene(scene: SceneView, { forModel = false } = {}): stri
   if (scene.npcs.length) {
     const people = scene.npcs.map((n) => {
       const who = scene.knownNpcs.includes(n.id) ? n.name : n.appearance;
-      return forModel ? `${who} (${n.pronouns})` : who;
+      const along = scene.companions.includes(n.id);
+      if (forModel) return `${who} (${n.pronouns}${along ? ", travelling with the player" : ""})`;
+      return along ? `${who} (with you)` : who;
     });
     lines.push(`People here: ${people.join("; ")}`);
   }
   if (scene.items.length) lines.push(`You see: ${scene.items.join(", ")}`);
   if (scene.notes.length) lines.push(`Changed: ${scene.notes.join(" ")}`);
+  return lines.join("\n");
+}
+
+/**
+ * What's different about a place the player is back at, as plain statements (empty if nothing is): what
+ * happened to it, things gone or new, who's come or gone, and the time of day if that's turned.
+ */
+export function revisitChanges(scene: SceneView, { forModel = false } = {}): string[] {
+  const since = scene.since;
+  if (!since) return [];
+  const who = (n: NpcDef) => (scene.knownNpcs.includes(n.id) ? n.name : forModel ? n.appearance : n.epithet);
+  const list = (items: string[]) => items.map((i) => withArticle(bareItem(i))).join(", ");
+  return [
+    ...since.changes,
+    ...(since.itemsGone.length ? [`Gone: ${list(since.itemsGone)}.`] : []),
+    ...(since.itemsNew.length ? [`New here: ${list(since.itemsNew)}.`] : []),
+    ...(since.arrived.length ? [`Here now who weren't before: ${since.arrived.map(who).join("; ")}.`] : []),
+    ...(since.gone.length ? [`No longer here: ${since.gone.map(who).join("; ")}.`] : []),
+    ...(since.then !== scene.time.phase ? [`It was ${since.then} when ${forModel ? "the player was" : "you were"} last here; now it's ${scene.time.phase}.`] : []),
+  ];
+}
+
+/** For the narrator, on coming back somewhere: the place is known, so tell only what's different. */
+export function revisitOutcome(scene: SceneView): string {
+  const since = scene.since!;
+  const changes = revisitChanges(scene, { forModel: true });
+  const known = `The player has been at ${scene.location.name} before, ${describeSpan(since.ago)} ago, and knows it: don't describe the place again, beyond a few words to set the scene.`;
+  return changes.length
+    ? `${known} Tell what's different since they were last here, and who is here now: ${changes.join(" ")}`
+    : `${known} Nothing about it has changed since; say so in a sentence, and say who is here now, if anyone.`;
+}
+
+/** A place the player is back at, without the LLM (for /go): its name, what's changed, who and what's here, the way out. */
+export function describeRevisit(scene: SceneView): string {
+  const changes = revisitChanges(scene);
+  const lines = [scene.location.name, changes.length ? `Since you were last here: ${changes.join(" ")}` : "Just as you left it."];
+  if (scene.npcs.length) {
+    const people = scene.npcs.map((n) => {
+      const who = scene.knownNpcs.includes(n.id) ? n.name : n.appearance;
+      return scene.companions.includes(n.id) ? `${who} (with you)` : who;
+    });
+    lines.push(`People here: ${people.join("; ")}`);
+  }
+  if (scene.items.length) lines.push(`You see: ${scene.items.join(", ")}`);
+  if (scene.exits.length) lines.push(`Exits: ${scene.exits.map((e) => `${e.direction} (${e.name})`).join(", ")}`);
   return lines.join("\n");
 }
 
@@ -95,6 +142,11 @@ export function describeOutcome(intent: Intent, resolution: Resolved, scene: Sce
   if (event?.type === "item_given" && resolution.npc) {
     return [{ kind: "narration", text: `You give ${npcLabel(resolution.npc, scene.knownNpcs)} ${withArticle(event.item)}.` }];
   }
+  if ((event?.type === "joined" || event?.type === "parted") && resolution.npc) {
+    const who = capitalize(npcLabel(resolution.npc, scene.knownNpcs));
+    if (event.type === "joined") return [{ kind: "narration", text: `${who} comes with you.` }];
+    return [{ kind: "narration", text: event.locationId === scene.location.id ? `${who} stays here.` : `${who} sets off on their own.` }];
+  }
   if (event?.type === "item_dropped") {
     return [{ kind: "narration", text: `You put down ${withArticle(bareItem(event.item))}.` }];
   }
@@ -104,9 +156,10 @@ export function describeOutcome(intent: Intent, resolution: Resolved, scene: Sce
     const via = moves.slice(0, -1).flatMap((m) => (m.type === "moved" ? [scene.knownPlaces.find((p) => p.id === m.to)?.name ?? m.to] : []));
     return [
       { kind: "narration", text: `You make your way there by way of ${via.join(", then ")}.` },
-      { kind: "narration", text: describeScene(scene) },
+      { kind: "narration", text: scene.since ? describeRevisit(scene) : describeScene(scene) },
     ];
   }
+  if (intent.kind === "move" && moves.length && scene.since) return [{ kind: "narration", text: describeRevisit(scene) }];
   if (intent.kind === "search") {
     const found = resolution.events.flatMap((e) => (e.type === "item_found" ? [withArticle(bareItem(e.item))] : []));
     return [{ kind: "narration", text: found.length ? `You search, and find ${found.join(" and ")}.` : "You search, but find nothing." }];
@@ -138,6 +191,14 @@ export function describeEvents(events: WorldEvent[], scene: SceneView, npc?: Npc
       }
       case "item_given":
         return `The player gave ${npc ? npcLabel(npc, scene.knownNpcs) : "someone"} ${withArticle(event.item)}; it is now theirs.`;
+      case "joined":
+        return `${capitalize(npc ? npcLabel(npc, scene.knownNpcs) : "Someone")} agrees to come along: from now on they go wherever the player goes.`;
+      case "parted": {
+        const who = capitalize(npc ? npcLabel(npc, scene.knownNpcs) : "Someone");
+        return event.locationId === scene.location.id
+          ? `${who} parts from the player and stays here; they no longer follow.`
+          : `${who} parts from the player and sets off on their own; they no longer follow.`;
+      }
       case "quest_completed": {
         const title = scene.quests.find((q) => q.id === event.questId)?.title ?? event.questId;
         return `This completes the player's quest "${title}".`;

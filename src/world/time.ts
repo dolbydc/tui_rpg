@@ -41,9 +41,29 @@ export function clock(minutes: number): string {
   return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
 }
 
-/** "Day 2, morning (07:20)": for the narrator and NPCs. */
+/** What the sky's doing in each part of the day: the bare word "evening" isn't always enough to stop a model guessing. */
+const DAYLIGHT: Record<TimeOfDay["phase"], string> = {
+  dawn: "the sun is coming up",
+  morning: "the sun is up and the day is still young; it's hours until dark",
+  afternoon: "it's broad daylight, with the evening still hours off",
+  evening: "the sun is going down",
+  night: "it's dark",
+};
+
+/** "day 2, morning (07:20): the sun is up and…": for the narrator and NPCs. */
 export function describeTime(time: TimeOfDay): string {
-  return `day ${time.day}, ${time.phase} (${clock(time.minutes)})`;
+  return `day ${time.day}, ${time.phase} (${clock(time.minutes)}): ${DAYLIGHT[time.phase]}`;
+}
+
+/** "a few minutes", "about 40 minutes", "about 3 hours", "2 days": how long ago, roughly. */
+export function describeSpan(seconds: number): string {
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 5) return "a few minutes";
+  if (minutes < 60) return `about ${Math.round(minutes / 10) * 10 || 5} minutes`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return hours === 1 ? "about an hour" : `about ${hours} hours`;
+  const days = Math.round(hours / 24);
+  return days === 1 ? "a day" : `${days} days`;
 }
 
 /** "20:00" → 1200. */

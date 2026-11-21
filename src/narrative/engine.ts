@@ -1,10 +1,13 @@
-import type { CheckRequest, CheckResult, Complication, Intent, LogLine, NpcDef, Resolved, SceneView } from "../domain/types.js";
-import type { ChatMessage, LlmProvider } from "../llm/provider.js";
+import type { Activity, CheckRequest, CheckResult, Complication, Intent, LogLine, NpcDef, NpcPlan, Resolved, SceneView } from "../domain/types.js";
+import type { Situation } from "../world/agency.js";
+import { findMatch, nameForms } from "../world/engine.js";
+import type { ChatMessage, CompletionRequest, LlmProvider } from "../llm/provider.js";
 import { pastReplies, type Recollection } from "../world/memory.js";
 import type { ExchangeCandidate, ExchangeChoice, Fact } from "../world/sharing.js";
 import { describeTime } from "../world/time.js";
-import { checkOutcome, describeEvents, NO_DICE } from "./describe.js";
+import { checkOutcome, describeEvents, NO_DICE, npcLabel, revisitOutcome } from "./describe.js";
 import {
+  agentMessages,
   complicationMessages,
   dialogueMessages,
   exchangeMessages,
@@ -42,15 +45,36 @@ export interface NarrationRequest {
 export class NarrativeEngine {
   private readonly llm: LlmProvider;
   private readonly rules: string;
+  private calls = 0;
 
-  constructor(llm: LlmProvider, rules: string) {
+  /** `onActivity` hears each call to the model as it starts and ends, and whose it is. */
+  constructor(
+    llm: LlmProvider,
+    rules: string,
+    private readonly onActivity?: (activity: Activity) => void,
+  ) {
     this.llm = llm;
     this.rules = rules;
   }
 
+  /** A call to the model on `agent`'s behalf, told of as it starts and ends. */
+  private async ask(agent: string, task: string, request: CompletionRequest): Promise<string> {
+    const call = ++this.calls;
+    this.onActivity?.({ type: "thinking", call, agent, task, phase: "start" });
+    try {
+      return await this.llm.complete(request);
+    } finally {
+      this.onActivity?.({ type: "thinking", call, agent, task, phase: "end" });
+    }
+  }
+
   /** `partner` is the NPC the player is mid-conversation with, if any. */
   async interpret(input: string, scene: SceneView, partner?: NpcDef): Promise<Intent> {
-    const raw = await this.llm.complete({ messages: interpretMessages(input, scene, partner), json: true, temperature: 0 });
+    const raw = await this.ask("player", "reading what you meant", {
+      messages: interpretMessages(input, scene, partner),
+      json: true,
+      temperature: 0,
+    });
     return parseIntent(raw, input);
   }
 
@@ -64,11 +88,11 @@ export class NarrativeEngine {
       const messages = dialogueMessages(this.rules, resolution.npc, scene, recent, intent.message, memories, player, attempt);
       // Example lines in their way of speaking are for the sound of it: saying one is repeating it.
       const examples = resolution.npc.speech?.match(/"[^"]+"/g) ?? [];
-      const text = await this.reply(messages, [...examples, ...pastReplies(memories.talked)]);
+      const text = await this.reply(resolution.npc.id, messages, [...examples, ...pastReplies(memories.talked)]);
       return [{ kind: "npc", speaker: resolution.npc.name, npcId: resolution.npc.id, text }];
     }
     const messages = narrationMessages(this.rules, scene, recent, input, outcome(intent, resolution, scene));
-    const text = await this.llm.complete({ messages, temperature: 0.8 });
+    const text = await this.ask("narrator", "telling what happened", { messages, temperature: 0.8 });
     return [{ kind: "narration", text: text.trim() }];
   }
 
@@ -76,11 +100,11 @@ export class NarrativeEngine {
    * An NPC's reply. If it says again what they've said to the player before, they're asked once more for
    * something new; the second answer stands either way.
    */
-  private async reply(messages: ChatMessage[], past: string[]): Promise<string> {
-    const first = (await this.llm.complete({ messages, temperature: 0.8 })).trim();
+  private async reply(npcId: string, messages: ChatMessage[], past: string[]): Promise<string> {
+    const first = (await this.ask(npcId, "replying to you", { messages, temperature: 0.8 })).trim();
     const again = repeated(first, past);
     if (!again.length) return first;
-    const retry = await this.llm.complete({
+    const retry = await this.ask(npcId, "finding something new to say", {
       messages: [
         ...messages,
         { role: "assistant", content: first },
@@ -96,7 +120,7 @@ export class NarrativeEngine {
 
   /** Words the delayed cost of an earlier partial success, as it surfaces where the player is. */
   async surface(complication: Complication, scene: SceneView, recent: LogLine[]): Promise<Surfaced | undefined> {
-    const raw = await this.llm.complete({
+    const raw = await this.ask("narrator", "springing a complication", {
       messages: complicationMessages(this.rules, scene, recent, complication),
       json: {
         type: "object",
@@ -110,6 +134,26 @@ export class NarrativeEngine {
     return text("narration") && text("lasting") ? { narration: text("narration"), lasting: text("lasting") } : undefined;
   }
 
+  /** What an NPC does next, from their goals and their situation; undefined if the model's answer makes no sense. */
+  async plan(view: Situation): Promise<NpcPlan | undefined> {
+    const raw = await this.ask(view.npc.id, "deciding what to do next", {
+      messages: agentMessages(this.rules, view),
+      json: {
+        type: "object",
+        properties: {
+          action: { type: "string", enum: ["stay", "go", "seek_player", "talk", "change", "leave_player"] },
+          to: { type: "string" },
+          with: { type: "string" },
+          change: { type: "string" },
+          doing: { type: "string" },
+        },
+        required: ["action", "doing"],
+      },
+      temperature: 0.7,
+    });
+    return parsePlan(raw, view);
+  }
+
   /**
    * Decides what two NPCs tell each other, from what the world engine allows each to share. `labels` are
    * how the player knows each of them, for the onlooker's summary.
@@ -119,7 +163,7 @@ export class NarrativeEngine {
     labels: { a: string; b: string },
     strangerPronouns: string,
   ): Promise<ExchangeChoice> {
-    const raw = await this.llm.complete({
+    const raw = await this.ask(candidate.a.id, `talking with ${candidate.b.name}`, {
       messages: exchangeMessages(candidate, labels, strangerPronouns),
       json: exchangeSchema(candidate),
       temperature: 0.4,
@@ -174,7 +218,12 @@ function outcome(intent: Intent, resolution: Resolved, scene: SceneView): string
         : "The world state does not change. Describe the attempt and its immediate result, but do not " +
           "move the player, add or remove items, change health, or resolve quests.";
   const searched = intent.kind === "search" ? searchOutcome(resolution, check) : "";
-  return [base, searched, check && `${checkOutcome(check)} ${NO_DICE}`].filter(Boolean).join(" ");
+  const refused =
+    intent.kind === "lead" && resolution.npc && !resolution.events.some((e) => e.type === "joined")
+      ? `${npcLabel(resolution.npc, scene.knownNpcs)} won't come along: they stay where they are, and don't follow the player.`
+      : "";
+  const back = intent.kind === "move" && scene.since && resolution.events.some((e) => e.type === "moved") ? revisitOutcome(scene) : "";
+  return [base, back, searched, refused, check && `${checkOutcome(check)} ${NO_DICE}`].filter(Boolean).join(" ");
 }
 
 /**
@@ -194,6 +243,37 @@ function searchOutcome(resolution: Resolved, check: CheckResult | undefined): st
 function rolled(resolution: Resolved): CheckResult | undefined {
   const event = resolution.events.find((e) => e.type === "checked");
   return event?.type === "checked" ? event.check : undefined;
+}
+
+/** The model's choice for an NPC, with places and people matched to ids; undefined if it can't be carried out. */
+export function parsePlan(raw: string, view: Situation): NpcPlan | undefined {
+  const data = parseObject(raw);
+  if (!data) return undefined;
+  const text = (key: string) => (typeof data[key] === "string" ? data[key].trim() : "");
+  const base = { npcId: view.npc.id, doing: text("doing") };
+  const place = () => (text("to") ? findMatch(view.places, text("to"), (l) => [l.name, l.label, l.id]) : undefined);
+  switch (data.action) {
+    case "stay":
+      return { ...base, action: "stay" };
+    case "go": {
+      const to = place();
+      return to && to.id !== view.place.id ? { ...base, action: "go", to: to.id } : { ...base, action: "stay" };
+    }
+    case "seek_player":
+      return { ...base, action: "seek_player" };
+    case "talk": {
+      const other = findMatch(view.people, text("with"), (n) => [n.name, n.epithet, ...nameForms(n)]);
+      return other ? { ...base, action: "talk", with: other.id } : { ...base, action: "stay" };
+    }
+    case "change":
+      return text("change") ? { ...base, action: "change", change: text("change") } : { ...base, action: "stay" };
+    case "leave_player": {
+      const to = place();
+      return { ...base, action: "leave_player", ...(to && { to: to.id }) };
+    }
+    default:
+      return undefined;
+  }
 }
 
 /** Parses the model's JSON intent; anything malformed becomes a generic action. */
@@ -249,6 +329,15 @@ function parseKind(data: Record<string, unknown> | undefined, input: string): In
     case "talk": {
       const npc = text("npc");
       return npc ? { kind: "talk", npc, message: text("message") ?? input } : fallback;
+    }
+    case "lead": {
+      const npc = text("npc");
+      return npc ? { kind: "lead", npc } : fallback;
+    }
+    case "dismiss": {
+      const npc = text("npc");
+      const to = text("to");
+      return npc ? { kind: "dismiss", npc, ...(to && { to }) } : fallback;
     }
     case "drop": {
       const item = text("item");

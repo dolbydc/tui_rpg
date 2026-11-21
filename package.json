@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "tsx src/index.tsx",
     "build": "tsc -p tsconfig.build.json",
+    "icon": "node scripts/icon.mjs",
     "start": "node dist/index.js",
     "electron": "npm run build && install-electron && node dist/electron/launch.js",
     "engine": "tsx src/engine/host.ts",
@@ -19,12 +20,14 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "better-sqlite3": "^12.11.1",
     "ink": "^8.0.0",
     "kokoro-js": "^1.2.1",
     "react": "^19.3.0",
+    "sharp": "^0.34.5",
     "yaml": "^2.9.1"
   },
   "devDependencies": {

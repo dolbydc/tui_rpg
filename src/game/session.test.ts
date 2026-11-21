@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { DEFAULT_CAMPAIGN_DIR } from "../config.js";
-import type { GameState } from "../domain/types.js";
+import type { Activity, GameState } from "../domain/types.js";
 import { MockProvider, type MockResponder } from "../llm/mock.js";
 import { describeScene } from "../narrative/describe.js";
 import { NarrativeEngine } from "../narrative/engine.js";
@@ -492,7 +492,7 @@ test("sleeping passes the night: the player wakes at 07:00, rested, and the worl
 
   // Everyone the player talks to afterwards knows it's morning.
   await session.submit("/talk innkeeper Morning.");
-  assert.match(llm.requests.at(-1)!.messages[1].content, /It is day 2, morning \(07:\d0\)/);
+  assert.match(llm.requests.at(-1)!.messages[1].content, /It is now day 2, morning \(07:\d0\)/);
 });
 
 test("searching the cellar turns up the ledger, which can then be taken; the narrator never invents a find", async () => {
@@ -586,4 +586,155 @@ test("a place the player has never been can't be travelled to", async () => {
   await session.start();
   assert.match((await session.submit("/go depths")).lines[0].text, /can't go/);
   assert.match((await session.submit("/go square")).lines[0].text, /already at Brackenford Square/);
+});
+
+test("/bring takes someone along: the place lists them as with you wherever you go, until /part", async () => {
+  const { session } = setup();
+  await session.start();
+  assert.deepEqual((await session.submit("/bring old man")).lines.map((l) => l.text).slice(0, 1), ["The old man comes with you."]);
+  const arrived = await session.submit("/go east");
+  assert.match(arrived.lines[0].text, /People here: a hunched old man.*\(with you\)/);
+  assert.doesNotMatch(arrived.lines.map((l) => l.text).join("\n"), /follows you/);
+
+  assert.equal((await session.submit("/part old man")).lines[0].text, "The old man stays here.");
+  const back = await session.submit("/go west");
+  assert.equal(back.lines[0].text.split("\n")[1], "Just as you left it.", "he left with you; the square didn't lose him");
+  assert.doesNotMatch(back.lines[0].text, /old man/);
+  assert.deepEqual(session.scene.companions, []);
+});
+
+test("asked along, someone reluctant who isn't persuaded stays put; the narrator is told how it went", async () => {
+  const lead = '{"kind":"lead","npc":"the old man","check":{"stat":"charisma","why":"talk the old man into coming","target":"the old man"}}';
+  const failed = setup((req) => (req.json ? lead : "He waves you off."), undefined, dice(1, 1));
+  await failed.session.start();
+  await failed.session.submit("Come with me, old man");
+  assert.deepEqual(failed.session.scene.companions, []);
+  assert.match(failed.llm.requests.at(-1)!.messages.map((m) => m.content).join("\n"), /the old man won't come along/);
+  assert.doesNotMatch(failed.llm.requests.at(-1)!.messages.map((m) => m.content).join("\n"), /agrees to come along/);
+
+  const persuaded = setup((req) => (req.json ? lead : "He grumbles, and comes."), undefined, dice(6, 6));
+  await persuaded.session.start();
+  await persuaded.session.submit("Come with me, old man");
+  assert.deepEqual(persuaded.session.scene.companions, ["old-pell"]);
+  assert.match(persuaded.llm.requests.at(-1)!.messages.map((m) => m.content).join("\n"), /agrees to come along/);
+});
+
+test("a companion is saved with the game", async () => {
+  const store = new InMemoryStore();
+  const first = setup(undefined, store);
+  await first.session.start();
+  await first.session.submit("/bring old man");
+  await first.session.submit("/go east");
+
+  const again = setup(undefined, store);
+  await again.session.resume();
+  assert.deepEqual(again.session.scene.npcs.map((n) => n.id), ["old-pell"]);
+  assert.deepEqual(again.session.scene.companions, ["old-pell"]);
+});
+
+/** The NPCs' turn, decided by the (mock) model: Marta boards up the inn; Pell whittles by the well. */
+function agents(req: Parameters<MockResponder>[0]): string | undefined {
+  const last = req.messages.at(-1)!.content;
+  if (/What does Marta Vell do next\?/.test(last)) {
+    return JSON.stringify({ action: "change", change: "The inn's shutters are nailed shut.", doing: "Marta Vell hammers boards across the shutters." });
+  }
+  if (/What does Old Pell do next\?/.test(last)) return JSON.stringify({ action: "stay", doing: "Old Pell whittles a stick by the well." });
+  return undefined;
+}
+
+function withAgents(respond: MockResponder = () => "(narration)") {
+  const llm = new MockProvider((req) => agents(req) ?? respond(req));
+  const session = new SessionController({
+    world,
+    narrative: new NarrativeEngine(llm, world.world.rules),
+    store: new InMemoryStore(),
+    campaignId: "test",
+    npcAgents: true,
+  });
+  return { session, llm };
+}
+
+test("NPCs decide what to do in the background, do it as the turn ends, and coming back shows only what changed", async () => {
+  const { session, llm } = withAgents();
+  await session.start();
+  await session.submit("/go inn");
+  await session.submit("/go out");
+  const ended = await session.submit("/wait");
+  // Each NPC was asked, once, while the turn was played.
+  assert.equal(llm.requests.filter((r) => /do next\?/.test(r.messages.at(-1)!.content)).length >= 2, true);
+  // Pell, in the square with the player, is seen at it (as the old man: the player doesn't know his name).
+  assert.ok(ended.lines.some((l) => l.text === "The old man whittles a stick by the well."), ended.lines.map((l) => l.text).join("\n"));
+  assert.ok(!ended.lines.some((l) => /shutters/.test(l.text)), "Marta's work at the inn happened out of sight");
+
+  const back = await session.submit("/go inn");
+  assert.equal(back.lines[0].text.split("\n")[1], "Since you were last here: The inn's shutters are nailed shut.");
+});
+
+test("coming back somewhere, the narrator is told not to describe it again, only what's different", async () => {
+  const { session, llm } = setup((req) => (req.json ? '{"kind":"move","direction":"inn"}' : "You're back."));
+  await session.start();
+  await session.submit("I go into the inn");
+  const first = llm.requests.at(-1)!.messages.at(-1)!.content;
+  assert.doesNotMatch(first, /has been at/);
+
+  await session.submit("/go out");
+  await session.submit("I go back into the inn");
+  const again = llm.requests.at(-1)!.messages.at(-1)!.content;
+  assert.match(again, /The player has been at The Hollow Lantern before, about 10 minutes ago, and knows it: don't describe the place again/);
+  assert.match(again, /Nothing about it has changed since/);
+});
+
+test("whoever the player talks with is in the conversation for a few actions; the one who just replied is speaking", async () => {
+  const { session } = setup((req) => (req.json ? '{"kind":"talk","npc":"the old man","message":"hello"}' : "Eh? Speak up!"));
+  await session.start();
+  assert.deepEqual(session.talking, { ids: [] });
+
+  await session.submit("say hello to the old man");
+  assert.deepEqual(session.talking, { ids: ["old-pell"], speaking: "old-pell" });
+
+  // Looking about doesn't end it at once; a few actions after, he's no longer in it (and nobody's speaking).
+  await session.submit("/look");
+  assert.deepEqual(session.talking, { ids: ["old-pell"] });
+  await session.submit("/look");
+  await session.submit("/look");
+  assert.deepEqual(session.talking.ids, [], "three actions on, the conversation has lapsed");
+});
+
+test("the game's minds are told of at work: each model call, whose it is, and what passes between them", async () => {
+  const activity: Activity[] = [];
+  const llm = new MockProvider((req) => (req.json ? '{"kind":"talk","npc":"the old man","message":"hello"}' : "Eh? Speak up!"));
+  const onActivity = (a: Activity) => activity.push(a);
+  const session = new SessionController({
+    world,
+    narrative: new NarrativeEngine(llm, world.world.rules, onActivity),
+    store: new InMemoryStore(),
+    campaignId: "test",
+    onActivity,
+  });
+  await session.start();
+  await session.submit("say hello to the old man");
+
+  const calls = activity.filter((a) => a.type === "thinking").map((a) => `${a.agent} ${a.phase}`);
+  assert.deepEqual(calls, ["player start", "player end", "old-pell start", "old-pell end"]);
+  const messages = activity.filter((a) => a.type === "message").map((a) => `${a.from}→${a.to} ${a.kind}: ${a.text}`);
+  assert.deepEqual(messages.slice(0, 2), ["player→old-pell said: hello", "old-pell→player said: Eh? Speak up!"]);
+
+  // He and the player now have to do with each other; Marta, at the inn, is listed wherever she is.
+  const minds = session.minds;
+  assert.ok(minds.links.some((l) => [l.a, l.b].sort().join() === "old-pell,player" && l.weight > 0));
+  assert.deepEqual(
+    minds.agents.map((a) => `${a.name} @ ${a.placeName}`),
+    ["Marta Vell @ The Hollow Lantern", "Old Pell @ Brackenford Square"],
+  );
+});
+
+test("an NPC is told what the time of day means, so a morning isn't mistaken for dusk", async () => {
+  const { session, llm } = setup((req) => (req.json ? '{"kind":"talk","npc":"the old man","message":"nice day"}' : "Aye."));
+  await session.start();
+  await session.submit("/sleep");
+  await session.submit("tell the old man it's a nice day");
+  const [system, user] = llm.requests.at(-1)!.messages;
+  assert.match(system.content, /Right now it is day 2, morning \(07:\d0\): the sun is up and the day is still young; it's hours until dark/);
+  assert.doesNotMatch(system.content, /"Evening\."/, "the example line doesn't suggest a time of day");
+  assert.match(user.content, /may be from another time of day/);
 });

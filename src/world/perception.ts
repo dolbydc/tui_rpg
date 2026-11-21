@@ -49,6 +49,8 @@ export function observe(world: WorldEngine, turn: WitnessedTurn): NpcMemory[] {
   const outcome = sneak?.type === "checked" ? sneak.check.outcome : undefined;
   const unseen = outcome === "success" || outcome === "partial_success";
   const witnesses = new Set<NpcDef>();
+  // Travelling with the player before and after: they came along.
+  const along = new Set((before.companions ?? []).filter((id) => after.companions?.includes(id)));
   const noted = (npc: NpcDef, kind: NpcMemory["kind"], text: string, said?: string) => {
     if (unseen && kind === "witnessed") return;
     if (kind === "witnessed") witnesses.add(npc);
@@ -61,7 +63,8 @@ export function observe(world: WorldEngine, turn: WitnessedTurn): NpcMemory[] {
         // Each step of a journey is seen by whoever is at that step, not only where it began.
         const from = world.location(event.from);
         const destination = world.location(event.to);
-        const leaving = from.id === here.id ? present : world.npcsAt(from.id, before);
+        // Companions go too; they don't see the player leave (see below for what they remember).
+        const leaving = (from.id === here.id ? present : world.npcsAt(from.id, before)).filter((npc) => !along.has(npc.id));
         const exit = Object.entries(from.exits).find(([, target]) => target === event.to)?.[0] ?? "";
         const heading = COMPASS.has(exit) ? `heading ${exit} toward` : "heading for";
         for (const npc of leaving) {
@@ -72,7 +75,7 @@ export function observe(world: WorldEngine, turn: WitnessedTurn): NpcMemory[] {
           }
         }
         for (const npc of world.npcsAt(destination.id, after)) {
-          if (npc.perception >= NOTICE.presence && !leaving.includes(npc)) {
+          if (npc.perception >= NOTICE.presence && !leaving.includes(npc) && !along.has(npc.id)) {
             noted(npc, "witnessed", `The stranger arrived at ${destination.name} from ${from.name}.`);
           }
         }
@@ -103,6 +106,30 @@ export function observe(world: WorldEngine, turn: WitnessedTurn): NpcMemory[] {
         break;
       }
     }
+  }
+
+  if (after.locationId !== before.locationId) {
+    const destination = world.location(after.locationId);
+    for (const id of along) {
+      memories.push(
+        newMemory(world.npc(id), {
+          turn: before.turn,
+          kind: "conversation",
+          about: "player",
+          text: `Went with the stranger from ${here.name} to ${destination.name}.`,
+        }),
+      );
+    }
+  }
+  // Joining or parting is between them and the player: a roll that went badly means they didn't come.
+  for (const npc of world.world.npcs.values()) {
+    const was = before.companions?.includes(npc.id) ?? false;
+    const is = after.companions?.includes(npc.id) ?? false;
+    if (was === is) continue;
+    const text = is
+      ? `Agreed to go along with the stranger, wherever they go.`
+      : `Parted from the stranger at ${here.name}${world.npcLocation(npc, after) === here.id ? ", to stay there" : `, to go to ${world.location(world.npcLocation(npc, after)).name}`}.`;
+    memories.push(newMemory(npc, { turn: before.turn, kind: "conversation", about: "player", text }));
   }
 
   if (intent.kind === "act") {

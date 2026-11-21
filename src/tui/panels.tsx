@@ -1,11 +1,36 @@
-import { Box, Text, Transform, type TextProps } from "ink";
+import { useEffect, useRef } from "react";
+import { Box, Text, Transform, useBoxMetrics, type DOMElement, type TextProps } from "ink";
 import { clock, formatBonus, statBonus, type Character, type LogLine, type MapView, type PlayerStatus, type Quest } from "../engine/api.js";
 import type { LineState } from "./line-editor.js";
 import { cellsAcross, renderMap, type Glyph, type GlyphStyle } from "./map-grid.js";
 
-const LOG_LIMIT = 60;
+/** As much of the story as is kept (app.tsx keeps the last 200 entries). */
+const LOG_LIMIT = 200;
 
-export function DialogueLog({ title, lines, busy }: { title: string; lines: LogLine[]; busy: boolean }) {
+/** How far the story can scroll back, and how many rows of it show at once. */
+export interface ScrollRange {
+  max: number;
+  page: number;
+}
+
+interface DialogueLogProps {
+  title: string;
+  lines: LogLine[];
+  busy: boolean;
+  /** Rows scrolled back from the newest (0: following the story as it comes). */
+  back?: number;
+  /** Told how far the story can scroll whenever that changes. */
+  onScrollRange?: (range: ScrollRange) => void;
+}
+
+export function DialogueLog({ title, lines, busy, back = 0, onScrollRange }: DialogueLogProps) {
+  const viewport = useRef<DOMElement>(null);
+  const content = useRef<DOMElement>(null);
+  const { clientHeight } = useBoxMetrics(viewport);
+  const { height } = useBoxMetrics(content);
+  const max = Math.max(0, height - clientHeight);
+  const shown = Math.min(back, max);
+  useEffect(() => onScrollRange?.({ max, page: Math.max(1, clientHeight - 1) }), [max, clientHeight]);
   return (
     // flexBasis 0: take exactly the width left beside the sidebar. Sized from its content instead, the log
     // shrinks to a fractional width, and text wrapped to the rounded-up width loses its last column.
@@ -15,18 +40,35 @@ export function DialogueLog({ title, lines, busy }: { title: string; lines: LogL
           {title}
         </Text>
       </Box>
-      {/* Anchored to the bottom so the newest lines stay visible; older ones clip off the top. Entries
-          mustn't shrink, or an overfull log squeezes every entry and cuts off the end of each. */}
-      <Box flexDirection="column" flexGrow={1} justifyContent="flex-end" overflow="hidden">
-        {lines.slice(-LOG_LIMIT).map((line, i) => (
-          <Box key={i} flexShrink={0} marginTop={line.kind === "player" ? 1 : 0}>
-            <Transform transform={trimWrappedRow}>
-              <Line line={line} />
-            </Transform>
-          </Box>
-        ))}
-        {busy && <Text dimColor>…</Text>}
+      {/* Anchored to the bottom so the newest lines stay visible; older ones clip off the top, and scrolling
+          back moves the story down (a negative offset) to bring them into view. The story keeps its full
+          height (flexShrink 0), or an overfull log squeezes every entry and cuts off the end of each. */}
+      <Box
+        ref={viewport}
+        flexDirection="column"
+        flexGrow={1}
+        justifyContent="flex-end"
+        overflow="hidden"
+        contentOffsetY={-shown}
+      >
+        <Box ref={content} flexDirection="column" flexShrink={0}>
+          {lines.slice(-LOG_LIMIT).map((line, i) => (
+            <Box key={i} flexShrink={0} marginTop={line.kind === "player" ? 1 : 0}>
+              <Transform transform={trimWrappedRow}>
+                <Line line={line} />
+              </Transform>
+            </Box>
+          ))}
+          {busy && <Text dimColor>…</Text>}
+        </Box>
       </Box>
+      {shown > 0 && (
+        <Box flexShrink={0} justifyContent="center">
+          <Text dimColor>
+            ↓ {shown} more {shown === 1 ? "line" : "lines"} · PgDn / ↓ / wheel
+          </Text>
+        </Box>
+      )}
     </Box>
   );
 }

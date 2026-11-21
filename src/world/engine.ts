@@ -9,9 +9,11 @@ import type {
   MapView,
   NpcDef,
   NpcMovement,
+  PlaceSnapshot,
   QuestCondition,
   Resolution,
   Resolved,
+  Revisit,
   SceneView,
   WorldDefinition,
   WorldEvent,
@@ -69,6 +71,57 @@ export class WorldEngine {
     };
   }
 
+  /** The player's place as they see it now, to compare with when they come back. */
+  snapshot(state: GameState): GameState {
+    const here = state.locationId;
+    const snap: PlaceSnapshot = {
+      elapsed: state.elapsed,
+      items: [...(state.locationItems[here] ?? [])],
+      notes: (state.locationNotes[here] ?? []).length,
+      // Companions are with the player, not the place: they don't come or go from it.
+      people: this.npcsAt(here, state)
+        .map((n) => n.id)
+        .filter((id) => !state.companions?.includes(id)),
+    };
+    return { ...state, seen: { ...state.seen, [here]: snap } };
+  }
+
+  /** What's different about where the player is since they last saw it; undefined if they never have. */
+  revisit(state: GameState): Revisit | undefined {
+    const here = state.locationId;
+    const then = state.seen?.[here];
+    if (!then) return undefined;
+    const items = state.locationItems[here] ?? [];
+    const people = this.npcsAt(here, state);
+    return {
+      ago: state.elapsed - then.elapsed,
+      then: timeAt(then.elapsed, this.world.start.time).phase,
+      itemsGone: then.items.filter((i) => !items.includes(i)),
+      itemsNew: items.filter((i) => !then.items.includes(i)),
+      changes: (state.locationNotes[here] ?? []).slice(then.notes),
+      arrived: people.filter((n) => !then.people.includes(n.id) && !state.companions?.includes(n.id)),
+      gone: then.people.filter((id) => !people.some((n) => n.id === id)).map((id) => this.npc(id)),
+    };
+  }
+
+  /** The way from one place to another by any paths at all (for NPCs, who know their world): the stops, destination last. */
+  path(from: string, to: string): string[] {
+    const previous = new Map<string, string>([[from, ""]]);
+    const queue = [from];
+    for (const at of queue) {
+      if (at === to) break;
+      for (const next of Object.values(this.location(at).exits)) {
+        if (previous.has(next)) continue;
+        previous.set(next, at);
+        queue.push(next);
+      }
+    }
+    if (to === from || !previous.has(to)) return [];
+    const path = [to];
+    while (previous.get(path[0]) !== from) path.unshift(previous.get(path[0])!);
+    return path;
+  }
+
   scene(state: GameState): SceneView {
     const location = this.location(state.locationId);
     return {
@@ -78,6 +131,8 @@ export class WorldEngine {
         name: this.location(id).name,
       })),
       npcs: this.npcsAt(location.id, state),
+      companions: state.companions ?? [],
+      ...(state.seen?.[location.id] && { since: this.revisit(state) }),
       others: [...this.world.npcs.values()].filter((npc) => this.npcLocation(npc, state) !== location.id),
       knownNpcs: state.knownNpcs,
       items: state.locationItems[location.id] ?? [],
@@ -89,8 +144,14 @@ export class WorldEngine {
     };
   }
 
-  /** Where an NPC is: following their routine (a step every ROUTINE_STEP_SECONDS), held back while they paused. */
+  /**
+   * Where an NPC is: with the player, if they're travelling together; where they were left, if they were;
+   * otherwise following their routine (a step every ROUTINE_STEP_SECONDS), held back while they paused.
+   */
   npcLocation(npc: NpcDef, clock: Clock): string {
+    if (clock.locationId && clock.companions?.includes(npc.id)) return clock.locationId;
+    const left = clock.npcPlaces?.[npc.id];
+    if (left) return left;
     if (!npc.routine) return npc.locationId;
     const step = 1 + Math.floor((clock.elapsed - (clock.routineDelay[npc.id] ?? 0)) / ROUTINE_STEP_SECONDS);
     const length = npc.routine.length;
@@ -297,12 +358,16 @@ export class WorldEngine {
     return { ok: true, events: [{ type: "levelled_up", stat: name, cost }] };
   }
 
-  /** NPCs whose routine took them into or out of the player's sight between two states. */
+  /**
+   * NPCs whose routine took them into or out of the player's sight between two states. Companions coming along
+   * aren't announced: they're with the player, and the place lists them.
+   */
   npcMovements(before: GameState, after: GameState): NpcMovement[] {
     const here = after.locationId;
     const playerMoved = before.locationId !== here;
     const movements: NpcMovement[] = [];
     for (const npc of this.world.npcs.values()) {
+      if (before.companions?.includes(npc.id) && after.companions?.includes(npc.id)) continue;
       const from = this.npcLocation(npc, before);
       const to = this.npcLocation(npc, after);
       if (from === to) continue;
@@ -404,6 +469,21 @@ export class WorldEngine {
         if (!stack) return { ok: false, reason: `You don't have "${intent.item}".` };
         return { ok: true, events: [{ type: "item_given", item: takeOne(stack).given, npcId: npc.id }], npc };
       }
+      case "lead": {
+        const npc = findPerson(scene.npcs, intent.npc, state);
+        if (!npc) return { ok: false, reason: `There's nobody called "${intent.npc}" here.` };
+        if (state.companions?.includes(npc.id)) return { ok: false, reason: `${sentenceCase(state.knownNpcs.includes(npc.id) ? npc.name : npc.epithet)} is already with you.` };
+        return { ok: true, events: [{ type: "joined", npcId: npc.id }], npc };
+      }
+      case "dismiss": {
+        const companions = scene.npcs.filter((n) => state.companions?.includes(n.id));
+        const npc = findPerson(companions, intent.npc, state);
+        if (!npc) return { ok: false, reason: `Nobody called "${intent.npc}" is with you.` };
+        // Sent somewhere: anywhere in the world they could know of, not only where the player has been.
+        const place = intent.to ? findMatch([...this.world.locations.values()], intent.to, (l) => [l.name, l.label, l.id]) : undefined;
+        if (intent.to && !place) return { ok: false, reason: `There's no "${intent.to}" to send them to.` };
+        return { ok: true, events: [{ type: "parted", npcId: npc.id, locationId: place?.id ?? state.locationId }], npc };
+      }
       case "drop": {
         const stack = findMatch(state.character.inventory, singular(intent.item), (i) => [i, singular(i)]);
         if (!stack) return { ok: false, reason: `You don't have "${intent.item}".` };
@@ -438,6 +518,13 @@ export class WorldEngine {
           next.npcItems[event.npcId] = [...(next.npcItems[event.npcId] ?? []), event.item];
           break;
         }
+        case "joined":
+          next.companions = [...(next.companions ?? []).filter((id) => id !== event.npcId), event.npcId];
+          break;
+        case "parted":
+          next.companions = (next.companions ?? []).filter((id) => id !== event.npcId);
+          next.npcPlaces = { ...next.npcPlaces, [event.npcId]: event.locationId };
+          break;
         case "quest_completed": {
           const quest = next.quests.find((q) => q.id === event.questId);
           if (quest) quest.status = "completed";
@@ -633,6 +720,10 @@ function findPerson(people: NpcDef[], query: string, state: GameState): NpcDef |
   const sharing = people.filter((n) => npcKeys(n, state).some((key) => sharesWord(query, key)));
   if (sharing.length === 1) return sharing[0];
   return people.find((n) => n.id === state.conversation?.npcId);
+}
+
+function sentenceCase(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 /** Whether two texts share a word of four letters or more, either inside the other ("barwoman" ~ "woman"). */

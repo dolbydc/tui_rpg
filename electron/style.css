@@ -549,6 +549,18 @@ body {
   font-weight: 600;
 }
 
+#people .with-you {
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid var(--good);
+  border-radius: 3px;
+  color: var(--good);
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 #people .appearance {
   color: var(--muted);
   font-size: 12px;
@@ -588,6 +600,447 @@ body {
   text-align: center;
   text-shadow: 0 1px 3px rgb(0 0 0 / 0.9);
   line-height: 1.2;
+}
+
+/* Whoever the player is talking with, large over the picture; the picture dims behind them. */
+
+#scene-image {
+  transition: opacity 0.6s ease, filter 0.5s ease;
+}
+
+#scene.talking #scene-image {
+  filter: brightness(0.55) saturate(0.85);
+}
+
+#scene-talk {
+  position: absolute;
+  inset: 0 0 0 0;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  gap: clamp(8px, 3vw, 40px);
+  padding: 16px 24px 0;
+  pointer-events: none;
+}
+
+.talker {
+  position: relative;
+  margin: 0;
+  height: 94%;
+  aspect-ratio: 896 / 1152;
+  max-width: calc((100% - 48px) / var(--talkers, 1));
+  transition: transform 0.4s ease, filter 0.4s ease, opacity 0.4s ease;
+  animation: step-in 0.45s ease both;
+}
+
+@keyframes step-in {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+}
+
+.talker img,
+.talker .talker-blank {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 15%;
+  border-radius: 14px 14px 0 0;
+  /* Fades into the picture at the bottom, behind the caption. */
+  mask-image: linear-gradient(to bottom, #000 72%, transparent 100%);
+  filter: drop-shadow(0 8px 24px rgb(0 0 0 / 0.6));
+}
+
+/* Cut out: just them, standing in the scene; their outline casts the shadow, and only their lower edge fades. */
+.talker img.cut {
+  border-radius: 0;
+  object-fit: contain;
+  object-position: center bottom;
+  mask-image: linear-gradient(to bottom, #000 82%, transparent 100%);
+  /* A tight shadow that hugs their outline: a wide one darkens the scene round them like a backdrop. */
+  filter: drop-shadow(0 2px 3px rgb(0 0 0 / 0.55));
+}
+
+.talker .talker-blank {
+  display: grid;
+  place-items: center;
+  background: linear-gradient(#2a2c40, #1d1e2c);
+  color: var(--muted);
+  font-size: 64px;
+  font-weight: 700;
+}
+
+.talker .talker-blank.drawing {
+  background: linear-gradient(110deg, #23253a 30%, #31345a 50%, #23253a 70%);
+  background-size: 200% 100%;
+  animation: sheen 1.6s linear infinite;
+}
+
+.talker figcaption {
+  position: absolute;
+  left: 50%;
+  bottom: 64px;
+  transform: translateX(-50%);
+  padding: 3px 12px;
+  border-radius: 12px;
+  background: rgb(14 15 24 / 0.8);
+  border: 1px solid var(--panel-border);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.talker.speaking figcaption {
+  border-color: var(--player);
+  color: var(--player);
+}
+
+.talker.listening {
+  transform: scale(0.92);
+  transform-origin: bottom center;
+  filter: brightness(0.75);
+}
+
+/* The caption sits over the portraits' faded feet. */
+#scene-caption {
+  z-index: 1;
+}
+
+#scene-people {
+  z-index: 2;
+}
+
+/* --- Minds: the agents, the model, and what passes between them ------------------------------- */
+
+#minds-panel {
+  cursor: pointer;
+}
+
+#minds-panel:hover {
+  border-color: #3a3e5c;
+}
+
+#minds-panel:hover .hint {
+  opacity: 1;
+}
+
+.minds-status {
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.minds-status::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+
+.minds-status.busy {
+  color: var(--text);
+}
+
+.minds-status.busy::before {
+  background: var(--drive);
+  box-shadow: 0 0 8px var(--drive);
+  animation: glow 1.2s ease-in-out infinite;
+}
+
+/* The minds window: the sheet fills it. */
+.minds-sheet {
+  background: var(--panel);
+  padding: 14px 18px 18px;
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.minds-sheet h2 {
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.minds-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 16px;
+}
+
+#minds-graph {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  background: #151622;
+  border-radius: 10px;
+}
+
+.minds-side {
+  width: 340px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.minds-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+.minds-legend i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 5px;
+  vertical-align: -1px;
+}
+
+.minds-legend .said,
+.fx-dot.said {
+  background: var(--player);
+  fill: var(--player);
+}
+
+.minds-legend .told,
+.fx-dot.told {
+  background: var(--good);
+  fill: var(--good);
+}
+
+.minds-legend .seen,
+.fx-dot.seen {
+  background: var(--accent);
+  fill: var(--accent);
+}
+
+.minds-legend .think,
+.fx-dot.think,
+.fx-dot.answer {
+  background: var(--drive);
+  fill: var(--drive);
+}
+
+#minds-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+  font-size: 12px;
+}
+
+#minds-log li {
+  padding: 6px 8px;
+  border-left: 3px solid var(--faint);
+  margin-bottom: 4px;
+  background: rgb(255 255 255 / 0.02);
+  border-radius: 0 6px 6px 0;
+}
+
+#minds-log li.said {
+  border-color: var(--player);
+}
+
+#minds-log li.told {
+  border-color: var(--good);
+}
+
+#minds-log li.seen {
+  border-color: var(--accent);
+}
+
+#minds-log li.think {
+  border-color: var(--drive);
+  color: var(--muted);
+}
+
+#minds-log .time {
+  color: var(--muted);
+  margin-right: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+#minds-log .detail {
+  color: var(--muted);
+  margin-top: 3px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.mind-link {
+  stroke: #4a4f75;
+  stroke-linecap: round;
+  opacity: 0.8;
+}
+
+.mind-spoke {
+  stroke: #33364f;
+  stroke-width: 1.5;
+  stroke-dasharray: 3 7;
+}
+
+.mind-spoke.active {
+  stroke: var(--drive);
+  stroke-width: 2.5;
+  stroke-dasharray: 8 8;
+  animation: flow 0.6s linear infinite;
+}
+
+@keyframes flow {
+  to {
+    stroke-dashoffset: -16;
+  }
+}
+
+.llm-core {
+  fill: #2a2346;
+  stroke: var(--drive);
+  stroke-width: 2.5;
+}
+
+.llm-glow {
+  opacity: 0.25;
+  transition: opacity 0.3s;
+}
+
+.llm.busy .llm-glow {
+  opacity: 1;
+  animation: glow 1.4s ease-in-out infinite;
+}
+
+.llm-label {
+  fill: var(--text);
+  font: 700 18px system-ui, sans-serif;
+  text-anchor: middle;
+}
+
+.llm-sub {
+  fill: var(--muted);
+  font: 12px system-ui, sans-serif;
+  text-anchor: middle;
+}
+
+.mind-bg {
+  fill: #262840;
+}
+
+.mind-ring {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+
+.mind.player .mind-ring {
+  stroke: var(--player);
+}
+
+.mind.narrator .mind-ring {
+  stroke: var(--drive);
+}
+
+.mind-halo {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 3;
+}
+
+.mind.with-player .mind-halo {
+  stroke: var(--good);
+  stroke-dasharray: 4 5;
+}
+
+.mind.thinking .mind-halo {
+  stroke: var(--drive);
+  stroke-dasharray: none;
+  animation: glow 1s ease-in-out infinite;
+}
+
+.mind-initial {
+  fill: var(--muted);
+  font: 700 24px system-ui, sans-serif;
+  text-anchor: middle;
+}
+
+.mind-name {
+  fill: var(--text);
+  font: 600 14px system-ui, sans-serif;
+  text-anchor: middle;
+}
+
+.mind-place {
+  fill: var(--muted);
+  font: 12px system-ui, sans-serif;
+  text-anchor: middle;
+}
+
+.mind-task {
+  fill: var(--drive);
+  font: italic 12px system-ui, sans-serif;
+  text-anchor: middle;
+}
+
+/* Labels stay readable over the lines and pulses that cross them. */
+.mind-name,
+.mind-place,
+.mind-task,
+.llm-label,
+.llm-sub {
+  paint-order: stroke;
+  stroke: #151622;
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+
+.fx-trail {
+  stroke-width: 3;
+  stroke-linecap: round;
+  transition: opacity 0.6s;
+}
+
+.fx-trail.said {
+  stroke: var(--player);
+}
+
+.fx-trail.told {
+  stroke: var(--good);
+}
+
+.fx-trail.seen {
+  stroke: var(--accent);
+}
+
+.fx-trail.think,
+.fx-trail.answer {
+  stroke: var(--drive);
+}
+
+.fx-dot {
+  filter: drop-shadow(0 0 6px currentColor);
+  transition: r 0.5s, opacity 0.6s;
+}
+
+.fx-dot.landed {
+  r: 22;
+  opacity: 0;
 }
 
 /* Ink redraws the whole screen in place, so there's never anything to scroll back to: no scrollbar. */

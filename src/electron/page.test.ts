@@ -68,3 +68,37 @@ test("a big map is shown round the player, three places each way, and all of it 
   const small = mapShapes({ level: 0, cells: [cell(0, 0, true), cell(1, 0)], links: [] });
   assert.equal(small.viewBox, "-28 -28 416 168", "a small map is shown whole");
 });
+
+test("the minds, when the engine sends them: the player and narrator first, each NPC where they are", () => {
+  const view = {
+    title: "T",
+    player: {
+      place: { id: "a", name: "A" },
+      people: [{ id: "p", label: "the smith", appearance: "a big woman", known: false, talking: true, speaking: true }],
+      character: { name: "Ash", pronouns: "they/them", hp: 3, maxHp: 10, level: 1, xp: 0, stats: {}, inventory: [] },
+      quests: [],
+      map: { level: 0, cells: [], links: [] },
+      status: { turn: 1, actionsLeft: 1, actionsPerTurn: 3, nextLevelXp: 100, drive: 0, drivePerQuest: 2, time: { day: 1, minutes: 0, phase: "night" as const } },
+    },
+    minds: {
+      agents: [
+        { id: "p", name: "Bryn", placeId: "a", placeName: "A", companion: false, image: "/art/bryn.png" },
+        { id: "q", name: "Cole", placeId: "b", placeName: "B", companion: false },
+      ],
+      links: [{ a: "p", b: "player", weight: 2 }],
+    },
+  };
+  const player = pageOf(view as never).player!;
+  assert.deepEqual(player.people[0], { label: "The smith", appearance: "a big woman", talking: true, speaking: true });
+  assert.deepEqual(
+    player.minds!.agents.map((a) => [a.id, a.role, a.place, a.withPlayer, a.url]),
+    [
+      ["player", "player", "A", true, undefined],
+      ["narrator", "narrator", undefined, false, undefined],
+      ["p", "npc", "A", true, "file:///art/bryn.png"],
+      ["q", "npc", "B", false, undefined],
+    ],
+  );
+  assert.deepEqual(player.minds!.links, view.minds.links);
+  assert.equal(pageOf({ ...view, minds: undefined } as never).player!.minds, undefined, "none unless the engine sends them");
+});

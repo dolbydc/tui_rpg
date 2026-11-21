@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Box, useApp, useInput, useWindowSize } from "ink";
 import type { Game, GameView, LogLine, Opened } from "../engine/api.js";
 import type { MusicPlayer } from "../voice/music.js";
 import type { VoiceOver } from "../voice/voice-over.js";
 import { EMPTY_LINE, editLine, type LineState } from "./line-editor.js";
-import { CharacterSheet, DialogueLog, InputLine, Inventory, MapPanel, QuestLog } from "./panels.js";
+import { CharacterSheet, DialogueLog, InputLine, Inventory, MapPanel, QuestLog, type ScrollRange } from "./panels.js";
 
 /** Wide enough for a map three places across. */
 const SIDEBAR_WIDTH = 36;
@@ -30,6 +30,16 @@ export function App({ game, opened, voice, music, onMenu, sidebar = true }: AppP
   const [input, setInput] = useState<LineState>(EMPTY_LINE);
   const [busy, setBusy] = useState(false);
   const [view, setView] = useState<GameView>(opened.view);
+  // How many rows the story is scrolled back from the newest; 0 follows it as it comes.
+  const [back, setBack] = useState(0);
+  const range = useRef<ScrollRange>({ max: 0, page: 1 });
+  const scroll = (rows: number) => setBack((back) => Math.max(0, Math.min(back + rows, range.current.max)));
+  function onScrollRange(next: ScrollRange) {
+    // Scrolled back, the story stays where it is as more comes in below.
+    const grew = next.max - range.current.max;
+    range.current = next;
+    setBack((back) => (back > 0 ? Math.max(0, Math.min(back + Math.max(grew, 0), next.max)) : 0));
+  }
   // Each row of places on the map takes six lines; show more of it on taller terminals.
   const mapRows = rows >= 46 ? 3 : rows >= 38 ? 2 : 1;
 
@@ -41,11 +51,12 @@ export function App({ game, opened, voice, music, onMenu, sidebar = true }: AppP
     // Between turns, the game can change by itself (a picture drawn) or have something to say.
     return game.subscribe((event) => {
       if (event.kind === "view") setView(event.view);
-      else setLog((log) => [...log, { kind: "system", text: event.text }]);
+      else if (event.kind === "notice") setLog((log) => [...log, { kind: "system", text: event.text }]);
     });
   }, []);
 
   async function submit(text: string) {
+    setBack(0);
     setLog((lines) => [...lines, { kind: "player", text }]);
     setBusy(true);
     voice.stop();
@@ -87,6 +98,15 @@ export function App({ game, opened, voice, music, onMenu, sidebar = true }: AppP
       voice.stop();
       return;
     }
+    // Scrolling the story works while a turn is under way, too.
+    if (key.upArrow || key.downArrow) {
+      scroll(key.upArrow ? 1 : -1);
+      return;
+    }
+    if (key.pageUp || key.pageDown) {
+      scroll(key.pageUp ? range.current.page : -range.current.page);
+      return;
+    }
     if (busy) return;
     // Keys typed while the app was busy can arrive in one chunk; an Enter at the end of it still submits.
     const enter = key.return || (/[\r\n]$/.test(char) && !key.ctrl && !key.meta);
@@ -105,7 +125,7 @@ export function App({ game, opened, voice, music, onMenu, sidebar = true }: AppP
       {/* Exactly the height the input line leaves: sized from its content, a long story pushed the input line
           out of the frame in a short terminal. The story inside is cut at the top instead. */}
       <Box flexGrow={1} flexShrink={1} flexBasis={0} minHeight={0} overflow="hidden">
-        <DialogueLog title={`${view.title} · ${player ? player.place.name : "A new character"}`} lines={log} busy={busy} />
+        <DialogueLog title={`${view.title} · ${player ? player.place.name : "A new character"}`} lines={log} busy={busy} back={back} onScrollRange={onScrollRange} />
         {player && sidebar && (
           <Box flexDirection="column" width={SIDEBAR_WIDTH} flexShrink={0}>
             <MapPanel map={player.map} width={SIDEBAR_WIDTH} rows={mapRows} />

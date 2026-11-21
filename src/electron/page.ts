@@ -2,7 +2,7 @@
 // (map, character, inventory, quests, who's here). Everything is worked out here, in the main process, so the
 // page only puts it on screen: files become URLs, stats get their bonuses, the map becomes shapes.
 import { pathToFileURL } from "node:url";
-import { clock, formatBonus, statBonus, type Game, type GameView, type MapView } from "../engine/api.js";
+import { clock, formatBonus, statBonus, type Game, type GameView, type MapView, type Minds } from "../engine/api.js";
 
 export interface PageView {
   title: string;
@@ -11,7 +11,18 @@ export interface PageView {
     /** `drawing`: its picture is on its way. */
     place: { name: string; url?: string; drawing?: boolean };
     /** Who's here, with their portrait, or `drawing` while it's on its way. */
-    people: { label: string; appearance: string; url?: string; drawing?: boolean }[];
+    people: {
+      label: string;
+      appearance: string;
+      url?: string;
+      drawing?: boolean;
+      companion?: boolean;
+      /** Their portrait cut out of its background, for showing them large over the picture. */
+      cutout?: string;
+      /** Being talked with: their portrait is shown large over the picture. `speaking`: they just replied. */
+      talking?: boolean;
+      speaking?: boolean;
+    }[];
     character: {
       name: string;
       pronouns: string;
@@ -33,7 +44,23 @@ export interface PageView {
     map: MapShapes;
     /** All of this level, for the map opened full-size. */
     fullMap: MapShapes;
+    /** The game's minds, for the window that shows them at work (when the engine sends them). */
+    minds?: MindsShapes;
   };
+}
+
+/** The player, the narrator and every NPC, as the minds window shows them; ids match Activity's agents. */
+export interface MindsShapes {
+  agents: {
+    id: string;
+    name: string;
+    role: "player" | "narrator" | "npc";
+    place?: string;
+    withPlayer: boolean;
+    companion: boolean;
+    url?: string;
+  }[];
+  links: { a: string; b: string; weight: number }[];
 }
 
 /** The map as boxes and lines in SVG user units; the page scales the whole thing to fit. */
@@ -125,6 +152,10 @@ export function pageOf(view: GameView): PageView {
         appearance: p.appearance,
         ...url(p.image),
         ...(p.drawing && !p.image && { drawing: true }),
+        ...(p.companion && { companion: true }),
+        ...(p.cutout && { cutout: pathToFileURL(p.cutout).href }),
+        ...(p.talking && { talking: true }),
+        ...(p.speaking && { speaking: true }),
       })),
       character: {
         name: character.name,
@@ -151,7 +182,33 @@ export function pageOf(view: GameView): PageView {
       quests: player.quests.map((q) => ({ title: q.title, done: q.status === "completed" })),
       map: mapShapes(player.map),
       fullMap: mapShapes(player.map, false),
+      ...(view.minds && { minds: mindsShapes(view.minds, character.name, player.place, url) }),
     },
+  };
+}
+
+/** The player and the narrator, then every NPC, where they are and whether they're with the player. */
+function mindsShapes(
+  minds: Minds,
+  playerName: string,
+  place: { id: string; name: string },
+  url: (file?: string) => { url?: string },
+): MindsShapes {
+  return {
+    agents: [
+      { id: "player", name: playerName, role: "player", place: place.name, withPlayer: true, companion: false },
+      { id: "narrator", name: "Narrator", role: "narrator", withPlayer: false, companion: false },
+      ...minds.agents.map((a) => ({
+        id: a.id,
+        name: a.name,
+        role: "npc" as const,
+        place: a.placeName,
+        withPlayer: a.placeId === place.id,
+        companion: a.companion,
+        ...url(a.image),
+      })),
+    ],
+    links: minds.links,
   };
 }
 

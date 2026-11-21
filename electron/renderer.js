@@ -3,6 +3,7 @@
 import { Terminal } from "../node_modules/@xterm/xterm/lib/xterm.mjs";
 import { FitAddon } from "../node_modules/@xterm/addon-fit/lib/addon-fit.mjs";
 import { drawScene, drawSidebar, setUpMapOverlay } from "./panels.js";
+import { setUpMindsPanel, showActivity, updateMinds } from "./minds.js";
 
 const rpg = window.rpg;
 
@@ -36,6 +37,17 @@ fit.fit();
 
 rpg.onOutput((data) => terminal.write(data));
 terminal.onData((data) => rpg.input(data));
+// There's no scrollback (Ink redraws in place): the wheel scrolls the story instead, as ↑/↓ do, three rows a notch.
+let wheel = 0;
+terminal.attachCustomWheelEventHandler((event) => {
+  wheel += event.deltaMode === WheelEvent.DOM_DELTA_LINE ? event.deltaY * 33 : event.deltaY;
+  const rows = Math.trunc(wheel / 33);
+  if (rows) {
+    wheel -= rows * 33;
+    rpg.input((rows < 0 ? "\x1b[A" : "\x1b[B").repeat(Math.abs(rows)));
+  }
+  return false;
+});
 terminal.onResize(({ cols, rows }) => rpg.resize(cols, rows));
 // The terminal is resized whenever the window is, or the picture comes or goes.
 new ResizeObserver(() => fit.fit()).observe(container);
@@ -48,8 +60,12 @@ document.addEventListener("mouseup", () => {
 });
 
 setUpMapOverlay(() => terminal.focus());
+// The minds open in a window of their own, to watch beside the game.
+setUpMindsPanel(() => rpg.openMinds());
+rpg.onActivity(showActivity);
 
 rpg.onView((view) => {
   drawScene(view.player);
   drawSidebar(view.player);
+  updateMinds(view.player?.minds);
 });

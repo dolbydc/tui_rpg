@@ -20,6 +20,7 @@ Each turn you have ${ACTIONS_PER_TURN} actions: moving, talking, taking (one ite
 looking around is free. People move about between turns. A turn is ${TURN_SECONDS / 60} minutes, or ${QUICK_TURN_SECONDS} seconds
 while you're in a conversation or a confrontation.
 Commands: /look  /search [where]  /go <exit>  /take <item>  /drop <item>  /give <item> to <name>  /talk <name> <message>
+          /bring <name> (they come with you)  /part <name> [to <place>] (they stay, or go there)
           /wait (end the turn)  /sleep (until morning; restores HP)  /levelup <stat> (spend XP)  /new (the menu: switch campaign, or start again)  /help  /quit
 Risky attempts (lying, fighting, sneaking, keeping your nerve) are settled by a hidden roll: the best of
 2d6 plus your stat's bonus; you only see how the story goes. Push one (/push <what you do>, or say you
@@ -57,6 +58,16 @@ export function parseCommand(input: string): Command | undefined {
       return npc && message.length
         ? { kind: "intent", intent: { kind: "talk", npc, message: message.join(" ") } }
         : needs("/talk <name> <message>");
+    }
+    case "bring":
+    case "follow":
+      return rest ? { kind: "intent", intent: { kind: "lead", npc: rest } } : needs("/bring <name>");
+    case "part":
+    case "dismiss": {
+      const match = /^(.+?)(?:\s+to\s+(.+))?$/i.exec(rest);
+      return match
+        ? { kind: "intent", intent: { kind: "dismiss", npc: match[1], ...(match[2] && { to: match[2] }) } }
+        : needs("/part <name> [to <place>]");
     }
     case "wait":
     case "end":

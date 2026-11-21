@@ -53,24 +53,38 @@ export function shareable(speaker: NpcDef, listener: NpcDef, memories: readonly 
     .slice(0, MAX_OFFERED);
 }
 
-/** The first pair of NPCs sharing a location this turn who haven't talked lately and have something to tell. */
+/**
+ * A pair of NPCs sharing a location this turn who haven't talked lately and have something to tell. Someone
+ * who sought the other out comes first; then those where the player is (so the player sees it), and among
+ * them, a companion with someone they've just been brought to: what they've seen on the way is news.
+ */
 export function findExchange(
   world: WorldEngine,
   memories: readonly NpcMemory[],
   clock: Clock,
+  /** Pairs where one sought the other out to talk (see world/agency.ts): they go before anyone. */
+  sought: readonly [string, string][] = [],
 ): ExchangeCandidate | undefined {
   const { turn } = clock;
   const npcs = [...world.world.npcs.values()];
+  const wanted = ({ a, b }: ExchangeCandidate) => sought.some(([x, y]) => (x === a.id && y === b.id) || (x === b.id && y === a.id));
+  const rank = (candidate: ExchangeCandidate) =>
+    (wanted(candidate) ? 4 : 0) +
+    (candidate.locationId === clock.locationId ? 2 : 0) +
+    ([candidate.a, candidate.b].some((n) => clock.companions?.includes(n.id)) ? 1 : 0);
+  let best: ExchangeCandidate | undefined;
   for (const [i, a] of npcs.entries()) {
     for (const b of npcs.slice(i + 1)) {
       const locationId = world.npcLocation(a, clock);
       if (world.npcLocation(b, clock) !== locationId || talkedRecently(a, b, memories, turn)) continue;
       const aToB = shareable(a, b, memories);
       const bToA = shareable(b, a, memories);
-      if (aToB.length || bToA.length) return { a, b, locationId, aToB, bToA };
+      if (!aToB.length && !bToA.length) continue;
+      const candidate = { a, b, locationId, aToB, bToA };
+      if (!best || rank(candidate) > rank(best)) best = candidate;
     }
   }
-  return undefined;
+  return best;
 }
 
 /** The memories an exchange leaves: what each heard, and that they talked. */

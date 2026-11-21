@@ -1,5 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
+import type { Activity } from "../domain/types.js";
 import type { LlmProvider } from "../llm/provider.js";
 import { NarrativeEngine } from "../narrative/engine.js";
 import type { CampaignStore, SaveSummary } from "../storage/store.js";
@@ -41,6 +42,13 @@ export async function listCampaigns(contentDir: string): Promise<CampaignInfo[]>
   return campaigns.filter((c) => c !== undefined).sort((a, b) => a.title.localeCompare(b.title));
 }
 
+export interface LibraryOptions {
+  /** NPCs decide for themselves (see SessionDeps). */
+  npcAgents?: boolean;
+  /** Hears the game's minds at work: model calls, and what passes between them. */
+  onActivity?: (activity: Activity) => void;
+}
+
 /** One campaign, ready to play. */
 export interface OpenCampaign {
   info: CampaignInfo;
@@ -59,13 +67,19 @@ export class CampaignLibrary {
     readonly campaigns: CampaignInfo[],
     private readonly store: CampaignStore,
     private readonly llm: LlmProvider,
+    private readonly options: LibraryOptions = {},
   ) {}
 
-  static async load(contentDir: string, store: CampaignStore, llm: LlmProvider): Promise<CampaignLibrary> {
+  static async load(
+    contentDir: string,
+    store: CampaignStore,
+    llm: LlmProvider,
+    options: LibraryOptions = {},
+  ): Promise<CampaignLibrary> {
     const campaigns = await listCampaigns(contentDir);
     if (!campaigns.length) throw new Error(`No campaigns in ${contentDir}: each needs a folder with a world.md`);
     if (campaigns.some((c) => c.id === LEGACY_SAVE.campaign)) await store.rename(LEGACY_SAVE.id, LEGACY_SAVE.campaign);
-    return new CampaignLibrary(campaigns, store, llm);
+    return new CampaignLibrary(campaigns, store, llm, options);
   }
 
   /** Saved games of campaigns that are still here, most recently played first. */
@@ -81,9 +95,11 @@ export class CampaignLibrary {
     const world = new WorldEngine(await loadWorld(info.dir));
     const session = new SessionController({
       world,
-      narrative: new NarrativeEngine(this.llm, world.world.rules),
+      narrative: new NarrativeEngine(this.llm, world.world.rules, this.options.onActivity),
       store: this.store,
       campaignId: info.id,
+      npcAgents: this.options.npcAgents,
+      onActivity: this.options.onActivity,
     });
     const opened = { info, world, session };
     this.open.set(id, opened);

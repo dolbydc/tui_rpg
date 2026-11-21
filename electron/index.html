@@ -15,6 +15,8 @@
       <!-- The picture of the place, when there is one (or one on its way). -->
       <section id="scene" hidden>
         <img id="scene-image" alt="" />
+        <!-- Whoever the player is talking with, large over the picture. -->
+        <div id="scene-talk"></div>
         <div id="scene-caption">
           <h1 id="scene-name"></h1>
           <span id="scene-drawing">drawing…</span>
@@ -32,6 +34,10 @@
         <svg id="map" role="img" aria-label="Map of the places you've been"></svg>
       </section>
       <section class="panel" id="character"></section>
+      <section class="panel" id="minds-panel" title="Open the minds in a window of their own">
+        <h2>Minds <span class="hint">click to open a window</span></h2>
+        <div id="minds-status" class="minds-status"></div>
+      </section>
       <section class="panel" id="people-panel">
         <h2>Here</h2>
         <ul id="people"></ul>

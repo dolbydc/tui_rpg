@@ -88,6 +88,9 @@ export async function loadWorld(dir: string): Promise<WorldDefinition> {
     rules: rules.body,
     ...(world.data.narrator_voice === undefined ? {} : { narratorVoice: str(world.data, "narrator_voice", worldFile) }),
     ...(world.data.art_style === undefined ? {} : { artStyle: str(world.data, "art_style", worldFile).trim() }),
+    ...(world.data.art_detail === undefined
+      ? {}
+      : { artDetail: oneOf(world.data.art_detail, ["simple", "detailed"] as const, "art_detail", worldFile) }),
     ...(world.data.music === undefined ? {} : { music: (await music(world.data, dir, worldFile, false)) ?? undefined }),
     start: {
       locationId: str(world.data, "start", worldFile),

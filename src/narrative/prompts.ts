@@ -1,6 +1,7 @@
 import type { CheckResult, Complication, LogLine, NpcDef, NpcMemory, SceneView, ShareLevel } from "../domain/types.js";
 import type { Recollection } from "../world/memory.js";
 import type { ChatMessage } from "../llm/provider.js";
+import type { Situation } from "../world/agency.js";
 import type { ExchangeCandidate, Fact } from "../world/sharing.js";
 import { describeTime } from "../world/time.js";
 import { checkOnNpc, describeScene, formatRecent, NO_DICE, npcLabel } from "./describe.js";
@@ -32,6 +33,8 @@ Reply with only a JSON object in one of these shapes:
 {"kind":"talk","npc":"...","message":"..."}  - the player speaks to someone; npc is the person they are speaking TO, copied exactly as the scene lists them (name or description, not a paraphrase), not someone they are asking about (if the player addresses no one in particular, whoever would most naturally answer, e.g. the host of the place), message is what the player says
 {"kind":"drop","item":"..."}  - the player puts down, drops, leaves or sets out one of their inventory items here (add a check only if placing it just so is genuinely tricky, like stacking crates neatly)
 {"kind":"give","item":"...","npc":"..."}  - the player hands one of their inventory items to someone in the scene; npc copied exactly as the scene lists them
+{"kind":"lead","npc":"..."}  - the player asks someone in the scene to come along with them, or takes them along (helps them up and out, escorts, carries, rescues them); npc copied exactly as the scene lists them
+{"kind":"dismiss","npc":"...","to":"..."}  - the player parts from someone travelling with them: tells them to wait or stay here, or sends them off somewhere; to is the place they're sent, if one is named (leave it out to have them stay here)
 {"kind":"wait"}  - the player waits, rests or lets time pass without doing anything
 {"kind":"sleep"}  - the player goes to sleep for the night
 {"kind":"search","where":"..."}  - the player searches, digs, feels around, or looks behind, under or inside something for what's hidden; where is the spot, if they name one (leave it out for a general search). Glancing around is "look", not "search"
@@ -45,7 +48,7 @@ Add "check" to an intent (not look or wait) only when the outcome is genuinely u
 If the player is trying not to be seen or noticed (sneaking, slipping past, moving quietly, doing something unobserved), use grace and add "stealth":true inside check. Sneaking somewhere is still a move (to that place), with the check.
 Only if the player says they're giving it everything (pushing themselves, digging deep, all or nothing), add "push":true inside check; otherwise never include "push".
 Needs a check: sneaking, lying or bluffing, persuading someone against their interests, intimidating, attacking, sneaking, picking a pocket, climbing, forcing a lock, steadying yourself against something terrifying.
-No check: ordinary conversation and honest questions, looking around, walking, picking things up, giving things.
+No check: ordinary conversation and honest questions, looking around, walking, picking things up, giving things, asking someone along who'd want to come (needs a check only if they'd be reluctant).
 
 Who is being spoken to: a person the player talks ABOUT (in the third person, e.g. "that old man", "Pell said…", "is Marta…") is not the one being spoken to; pick someone else in the scene. A person addressed directly ("Old man, …", "Marta, …", "I ask Pell …") is.
 Example, with an innkeeper and an old man in the scene:
@@ -53,6 +56,8 @@ Example, with an innkeeper and an old man in the scene:
 "Old man, is the innkeeper always this grumpy?" → {"kind":"talk","npc":"the old man","message":"Is the innkeeper always this grumpy?"}
 "I tell the innkeeper I'm the magistrate's nephew, so she'd better talk" → {"kind":"talk","npc":"the innkeeper","message":"I'm the magistrate's nephew, so you'd better talk.","check":{"stat":"charisma","why":"pass themselves off as the magistrate's nephew","target":"the innkeeper"}}
 "I sneak past the old man into the inn" → {"kind":"move","direction":"inn","check":{"stat":"grace","why":"slip past the old man unseen","stealth":true}}
+"Old man, come with me to the inn" → {"kind":"lead","npc":"the old man"}
+"Wait here for me, Marta" → {"kind":"dismiss","npc":"Marta"}
 "I shove the old man off the well" → {"kind":"act","action":"shove the old man off the well","check":{"stat":"might","why":"shove the old man off the well","target":"the old man"}}`,
     },
     {
@@ -149,12 +154,14 @@ ${yourName} ${self}
 World rules and tone:
 ${rules}
 
+Right now it is ${describeTime(scene.time)}.
+
 Stay in character, speak in your own voice (never repeat what someone else said), and pursue your goals. Never repeat yourself: don't reuse a greeting, phrase, description or piece of news you've already given the stranger. If they ask about something you've told them already, answer it briefly in new words, perhaps with a detail you haven't mentioned. Otherwise move the conversation on: something new you know, saw or heard, a question, or what you want from them. Use what you know and remember when it's relevant, and respect the brackets in your memories the same way: never reveal anything marked secret. ${npc.speech ? "Speak only as described under \"How you speak\": your words, your grammar. " : ""}Reply with only what you say aloud, in one to three sentences; you may add a brief action in *asterisks*, written in the third person (never "I say" or "*I lean*"). Never narrate for the player or decide their actions.
-Example of the form: "Evening." *${capitalize(npc.epithet)} sets down a cup.* "What brings you here?"`,
+Example of the form: "Well now." *${capitalize(npc.epithet)} sets down a cup.* "What brings you here?"`,
     },
     {
       role: "user",
-      content: `You are at ${scene.location.name}. It is ${describeTime(scene.time)}: keep what you say about the time of day consistent with it. Other people in town, who aren't here: ${absent(scene, "npc")}.
+      content: `You are at ${scene.location.name}. It is now ${describeTime(scene.time)}. Anything you say about the time of day, the light or the sun must fit that; your habits, memories and the recent events may be from another time of day. Other people in town, who aren't here: ${absent(scene, "npc")}.
 
 Recent events:
 ${formatRecent(recent)}
@@ -224,6 +231,59 @@ List items by their ids (A1, B2, ...), not their text; use an empty list if they
 summary is one sentence of what an onlooker would see: how they talk, not what they say. In it, refer to A only as "${labels.a}" and to B only as "${labels.b}".`,
     },
     { role: "user", content: `${side(a, "A", aToB)}\n\n${side(b, "B", bToA)}` },
+  ];
+}
+
+/** For deciding what an NPC does next: who they are, what they want and know, and where they are. */
+export function agentMessages(rules: string, view: Situation): ChatMessage[] {
+  const { npc, place } = view;
+  const people = [
+    ...view.people.map((n) => `${n.name}, ${n.epithet} (${n.pronouns})`),
+    ...(view.stranger ? [`${view.stranger.name ?? "the stranger"} (${view.stranger.pronouns}), the player character`] : []),
+  ];
+  const options = view.companion
+    ? `You are travelling with ${view.stranger?.name ?? "the stranger"}, the player character, and go where they go. Most turns you stay with them ("stay", "talk" or "change"); only "leave_player" if your goals now truly call you elsewhere (with "to" for where you go, or without it to stay here when they move on).`
+    : `"go" (with "to": a place by its name) moves you there, a few places a turn. "seek_player" goes to wherever the stranger is, if your goals call for finding them.`;
+  return [
+    {
+      role: "system",
+      content: `You decide what one character in a text RPG does next, in the next ten minutes or so, as that character would: from their goals, what they know and remember, and where they are. Other people have their own lives; most of the time people go about their business ("stay", with what they're doing), but they act when their goals call for it.
+
+# The world
+${rules.slice(0, 1200)}
+
+# The character: ${npc.name}, ${npc.epithet} (${npc.pronouns})
+${npc.persona.trim()}
+Goals:
+${list(npc.goals)}
+What they know:
+${list(npc.knowledge.map((k) => `${k.fact} ${SHARE_HINT[k.share]}`.trimEnd()))}
+
+Reply with only a JSON object: {"action": "...", "to": "...", "with": "...", "change": "...", "doing": "..."}
+action is one of:
+- "stay": stay here, going about their business
+- "talk": seek out someone here to talk with ("with": their name), to tell them something or ask them something
+- "change": do something that changes this place for good: barricading a door, starting a fire, smashing a console, hiding a body ("change": one sentence of how the place is left, as anyone arriving later would see it). Only when their goals truly call for it.
+- ${options}
+${view.companion ? "" : `- "leave_player" is only for someone travelling with the stranger; not you.
+`}doing: one short sentence in the third person, present tense, of what an onlooker would see them do, naming them ("${npc.name} paces by the hatch, muttering."). Leave it empty if there's nothing worth remarking on.`,
+    },
+    {
+      role: "user",
+      content: `It is ${describeTime(view.time)}.
+You are at ${place.name}: ${place.description.trim()}
+${view.notes.length ? `Changed here: ${view.notes.join(" ")}
+` : ""}People here: ${people.join("; ") || "(no one)"}
+Things here: ${view.items.join(", ") || "(nothing)"}
+Ways out: ${view.exits.map((e) => `${e.direction} (${e.name})`).join(", ") || "(none)"}
+${view.usual ? `At this hour you'd usually be at ${view.usual.name}.
+` : ""}Places you know: ${view.places.map((p) => p.name).join(", ")}
+
+What you remember, oldest first ("the stranger" is the player character):
+${list(view.memories.map(formatMemory))}
+
+What does ${npc.name} do next?`,
+    },
   ];
 }
 

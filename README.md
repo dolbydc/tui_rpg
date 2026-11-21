@@ -35,6 +35,33 @@ Wayland (`src/electron/launch.ts`): on WSLg's X11 the mouse pointer goes missing
 `PATH` (`TUI_RPG_NODE` picks another): its SQLite module is built for Node, not Electron. Under WSL the
 window opens through WSLg; if it doesn't, try `npm run electron -- --ozone-platform=wayland`.
 
+Whoever you're talking with stands large over the picture of the place, the picture dimmed behind them:
+the one you're in conversation with, and anyone else you've spoken with in the last three actions, so
+talking with two or three people shows them side by side, the one who just replied to the fore. Everyone
+else here keeps a small portrait in the corner. Each portrait is cut out of its background
+(`src/art/cutout.ts`), so it's them standing wherever they are now, not wherever they were drawn: a
+background-removal model ([BiRefNet](https://huggingface.co/onnx-community/BiRefNet_lite-ONNX) lite, run on
+the CPU with transformers.js; downloaded the first time, about 220 MB) cuts each one once, about ten
+seconds each in the background, and keeps it as `data/art/<campaign>/people/<npc>.cutout.png` (made again
+if the portrait is redrawn). Until it's ready, the portrait is shown as drawn. Portraits are drawn against a
+plain grey background, so nothing of a place comes with them.
+
+The window has its own icon (`electron/icon.svg`, drawn to `electron/icon.png` with `npm run icon`). Under
+WSL, WSLg shows a window's icon only from a desktop entry in `/usr/share/applications` named after the
+window's app id (`tui-rpg`), and a penguin otherwise: `sudo bash scripts/install-desktop.sh` installs one
+(and puts "TUI RPG" in the Windows Start menu). Restart WSL once (`wsl --shutdown`) if it doesn't show.
+
+**Minds, behind the scenes.** The "Minds" panel opens a window of its own (`electron/minds.html`),
+beside the game's, to watch while you play; it starts with what's happened lately. It shows the game's agents round the
+language model they think with: you (what you meant is read from what you typed), the narrator, and
+every NPC by name, with their portrait, where they are, and whether they're with you. Lines join those
+who've had to do with each other, thicker the more they have. As it happens, each call to the model runs
+out along that agent's spoke, with what they're thinking about ("deciding what to do next"), and its
+answer runs back; something said (gold), told as gossip (green) or seen (blue) runs from one agent to
+the other, and is listed beside the graph with what it was. The panel says what the model's doing even
+while the window's closed. It shows what the player doesn't know (names, where everyone is), so it's for
+watching the machinery; only the window gets it (`createGame`'s `minds` option), never the terminal.
+
 **Pictures drawn as you go.** With a [ComfyUI](https://www.comfy.org) server to draw them
 (`TUI_RPG_COMFY_URL`), the window shows a picture of each place the first time you arrive there, and a
 portrait of each person the first time you see them, if the campaign hasn't one of its own. A portrait
@@ -65,6 +92,8 @@ mining platform, where a deep bore broke into something and the crew were sealed
 
 In game, type anything to act, or use `/look`, `/search [where]`, `/go <exit>`, `/take <item>`,
 `/drop <item>`, `/give <item> to <name>`, `/talk <name> <message>`, `/wait`, `/new`, `/help`, `/quit` (Esc also quits).
+↑/↓ and PgUp/PgDn scroll back through the story (the mouse wheel too, in the window); taking a turn returns to
+the newest.
 Progress autosaves after every action and resumes on the next launch. `/memories <name>` shows what an
 NPC remembers (a debug aid).
 
@@ -192,6 +221,8 @@ a box's border marks stairs up or down.
 | `TUI_RPG_COMFY_URL` | (none) | a ComfyUI server to draw pictures of places with, e.g. `http://127.0.0.1:8188` |
 | `TUI_RPG_COMFY_MODEL` | `moss` | `zimage` draws with Z-Image-Turbo |
 | `TUI_RPG_ART_DIR` | `data/art` | where drawn pictures are kept |
+| `TUI_RPG_CUTOUT_MODEL` | `onnx-community/BiRefNet_lite-ONNX` | the background-removal model portraits are cut out with, or `off` |
+| `TUI_RPG_NPC_AGENTS` | `on` | `off`: NPCs only follow their routines, instead of deciding each turn what to do (one model call per NPC per turn) |
 
 ## Architecture
 
@@ -242,11 +273,34 @@ Each player action runs the same explicit pipeline in `SessionController`:
 2. **Resolve**: the world engine checks the intent against the rules and returns world events, or a reason it's impossible.
 3. **Apply**: the events produce the next `GameState` and the action's cost is spent; spending the last
    action ends the turn. Only world events change state.
+   - **NPCs act** as the turn ends: what each decided (below) is carried out, if it's still possible.
 4. **Narrate**: the narrative engine describes the authoritative outcome (plain commands get deterministic text).
+   Back somewhere they've been, the player is told only what's changed since (see "Places remembered").
 5. **Observe**: NPCs who were present remember what they noticed, depending on their perception.
 6. **NPC exchange**: as a new turn starts, two NPCs who meet may pass on what they know (at most one
-   conversation a turn).
-7. **Persist**: the new state, the action's record and new NPC memories are saved in one transaction.
+   conversation a turn; a pair where the player is goes first, a companion's before others).
+7. **Persist**: the new state, the action's record and new NPC memories are saved in one transaction,
+   with the place as the player leaves it. When a turn ends, the NPCs start deciding what to do with the
+   next one, in the background.
+
+**Places remembered.** The game keeps how each place was when the player last left it: what lay there,
+who was there, its lasting changes. Coming back, the narrator is told the player knows the place and not
+to describe it again: only what's different (a fire, a smashed console, things gone or new, who's come
+or gone, night fallen since), or that nothing has changed. `/go` prints the same: the place's name, what's
+changed, who and what's here, and the way out.
+
+**NPCs with minds of their own.** With `TUI_RPG_NPC_AGENTS` on (the default, with Ollama), each NPC
+decides every turn what to do next, by the language model: from their persona, goals, knowledge and
+memories, where they are, who's there and where their routine would have them (`src/world/agency.ts`,
+`agentMessages` in `src/narrative/prompts.ts`). They can stay and go about their business, go somewhere
+(up to three places a turn), go looking for the player, seek out someone where they are to talk (that
+pair's exchange goes first), or change their place for good: barricade a door, start a fire, smash a
+console. A companion can choose to leave the player. Everyone else at the place with perception 3 or
+more sees what they do and remembers it, so it spreads as gossip; the player sees it if they're there,
+and finds what's changed when they're next at the place. Someone who goes elsewhere leaves their routine
+until they choose to go back. The decisions are made one NPC at a time while the player plays the turn,
+so they rarely hold it up; if the model is slow, the turn's last action waits for them. The person the
+player is talking with doesn't decide anything while they talk.
 
 The world engine is pure and deterministic, so it's tested directly. The narrative engine is tested
 through `MockProvider`, which scripts model replies and records prompts.
@@ -261,7 +315,8 @@ name is its id, and its save's. (Saves from before the menu, under the id `defau
 - `world.md`: title, `tagline` (one line for the menu), starting location, character (name, pronouns, hp, stats, inventory, and
   optionally level and xp), `music` (an audio file's path from the campaign folder, e.g.
   `music: music/hum.mp3`; optional), `art_style` (how drawn pictures of its places should look, e.g.
-  `"Painterly dark-fantasy concept art: moody, soft volumetric light"`; optional) and quests; the body is the intro. Each quest has a definition of done
+  `"Painterly dark-fantasy concept art: moody, soft volumetric light"`; optional), `art_detail` (`simple` for pictures of a
+  few bold shapes with little fine detail, or `detailed`, the default; optional) and quests; the body is the intro. Each quest has a definition of done
   (`done`) the world engine checks after every action, and a `reward`:
 
   ```yaml
@@ -346,6 +401,13 @@ trusts: [marta]                 # NPCs they tell "trusted" things to
   keeps them where they are, and they carry on from where they paused once the conversation ends
   (the player leaves, or spends more than one action not addressing them). Mid-conversation, a line
   with no clear addressee is taken as said to them.
+- **Companions**: anyone can be asked along ("come with me", "I help Teo up and take him with me",
+  or `/bring <name>`). Someone who'd be reluctant is talked into it with a roll, and stays put if it
+  goes badly. A companion goes wherever the player goes, whatever their routine, and is listed as
+  "(with you)" in the place (and in the window's "Here" panel). They meet whoever is there like anyone
+  else, so they pass on what they know and pick up gossip. Told to wait ("wait here", `/part <name>`),
+  they stay where they're left; sent somewhere ("go to your sister in the medbay", `/part <name> to
+  <place>`), they go there and stay. Either way they don't go back to their routine.
 - **Perception** decides what an NPC remembers of the player's turns (`NOTICE` in
   `src/world/perception.ts`): 2 notices the player coming and going, 3 which way they went, what
   they picked up and what they did, 4 overhears their conversations. Whoever the player talks to

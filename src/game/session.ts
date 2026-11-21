@@ -1,4 +1,5 @@
 import type {
+  Activity,
   Character,
   GameState,
   Intent,
@@ -6,6 +7,7 @@ import type {
   LogLine,
   MapView,
   NpcMemory,
+  NpcPlan,
   SceneView,
   TimeOfDay,
   TurnRecord,
@@ -27,6 +29,7 @@ import { TURN_SECONDS } from "../world/time.js";
 import { knowsPlayerName, memoriesOf, newMemory, recall } from "../world/memory.js";
 import { observe } from "../world/perception.js";
 import { applyExchange, findExchange } from "../world/sharing.js";
+import { deciders, enact, situation } from "../world/agency.js";
 import { HELP, parseCommand } from "./commands.js";
 import { advanceCreation, startCreation, type Creation } from "./creation.js";
 
@@ -35,6 +38,17 @@ export interface SessionDeps {
   narrative: NarrativeEngine;
   store: CampaignStore;
   campaignId: string;
+  /** NPCs decide for themselves what to do each turn (a language model call each), not only follow routines. */
+  npcAgents?: boolean;
+  /** Hears what passes between the game's minds: what's said, told and seen (the model calls come from the narrative engine). */
+  onActivity?: (activity: Activity) => void;
+}
+
+/** The game's minds and how they're connected, for a frontend that shows them: every NPC, wherever they are. */
+export interface Minds {
+  agents: { id: string; name: string; placeId: string; placeName: string; companion: boolean; image?: string }[];
+  /** Pairs ("player" or NPC ids) who've had to do with each other, and how much: memories of one another. */
+  links: { a: string; b: string; weight: number }[];
 }
 
 export interface TurnResult {
@@ -64,6 +78,8 @@ export interface PlayerStatus {
 }
 
 const RECENT_LINES = 12;
+/** Someone the player spoke with stays "in the conversation" (their portrait up) for this many actions after. */
+const TALKING_ACTIONS = 3;
 
 /** Orchestrates a play session: commands, the turn pipeline, and save/load. The UI only talks to this. */
 export class SessionController {
@@ -75,6 +91,16 @@ export class SessionController {
   private memories: NpcMemory[] = [];
   /** Set while the player is making a character for a new game (after /new). */
   private creation?: Creation;
+  /**
+   * What the NPCs mean to do as the turn ends, decided in the background while the player plays it (one model
+   * call each takes a while), and carried out when it ends.
+   */
+  private planning?: Promise<NpcPlan[]>;
+  /** Actions played this session, and the last one each NPC spoke to the player in. */
+  private actions = 0;
+  private spoke = new Map<string, number>();
+  /** Who replied to the player in the latest action. */
+  private speaker?: string;
 
   constructor(deps: SessionDeps) {
     this.deps = deps;
@@ -106,6 +132,48 @@ export class SessionController {
     const { world } = this.deps.world;
     const here = this.state && world.locations.get(this.state.locationId);
     return (here?.music === undefined ? world.music : here.music) ?? undefined;
+  }
+
+  /**
+   * Who the player is talking with, here: the one they're in conversation with, and anyone else they've spoken
+   * with in the last few actions. Whoever replied last is `speaking`.
+   */
+  get talking(): { ids: string[]; speaking?: string } {
+    const state = this.game;
+    const here = this.scene.npcs.map((n) => n.id);
+    const ids = here.filter(
+      (id) => id === state.conversation?.npcId || this.actions - (this.spoke.get(id) ?? -Infinity) < TALKING_ACTIONS,
+    );
+    return { ids, ...(this.speaker && ids.includes(this.speaker) && { speaking: this.speaker }) };
+  }
+
+  /** Every NPC, where they are, and who's had to do with whom. */
+  get minds(): Minds {
+    const { world } = this.deps;
+    const state = this.game;
+    const agents = [...world.world.npcs.values()].map((npc) => {
+      const at = world.location(world.npcLocation(npc, state));
+      return {
+        id: npc.id,
+        name: npc.name,
+        placeId: at.id,
+        placeName: at.name,
+        companion: state.companions?.includes(npc.id) ?? false,
+        ...(npc.image && { image: npc.image }),
+      };
+    });
+    const weights = new Map<string, number>();
+    const link = (a: string, b: string) => {
+      if (a === b || (!world.world.npcs.has(a) && a !== "player") || (!world.world.npcs.has(b) && b !== "player")) return;
+      const key = [a, b].sort().join("\u0000");
+      weights.set(key, (weights.get(key) ?? 0) + 1);
+    };
+    for (const m of this.memories) link(m.npcId, m.source?.npcId ?? m.about);
+    const links = [...weights].map(([key, weight]) => {
+      const [a, b] = key.split("\u0000");
+      return { a, b, weight };
+    });
+    return { agents, links };
   }
 
   get map(): MapView {
@@ -183,6 +251,7 @@ export class SessionController {
     this.resumed = true;
     const replayed = saved.recent.flatMap(replay);
     this.keepRecent(replayed);
+    this.plan();
     return [...replayed, { kind: "system", text: `Resumed at turn ${this.state.turn}. Type /help for commands.` }];
   }
 
@@ -248,12 +317,22 @@ export class SessionController {
 
     // 2b. Roll: a risky attempt, or arriving somewhere that calls for it, is checked against a stat. Only the
     //     narrator learns how it went; the player sees the story, never the dice.
-    const resolved = { ...resolution, events: [...resolution.events, ...world.check(intent, resolution, state, input)] };
+    //     Someone who had to be talked into coming along doesn't, if that went badly.
+    const rolled = world.check(intent, resolution, state, input);
+    const refused = rolled.some((e) => e.type === "checked" && (e.check.outcome === "failure" || e.check.outcome === "partial_failure"));
+    const resolved = {
+      ...resolution,
+      events: [...resolution.events.filter((e) => !(refused && e.type === "joined")), ...rolled],
+    };
 
     // 3. Apply state changes and spend the action, ending the turn if it was the last. An NPC the player is
     //    talking with holds their routine.
     let next = world.act(state, intent, resolved);
     const turnEnded = next.turn !== state.turn;
+
+    // 3a. As the turn ends, the NPCs do what they decided to: go somewhere, seek someone out, change a place.
+    const enacted = turnEnded ? enact(world, next, await this.plans()) : { state: next, memories: [], lines: [], talks: [] };
+    next = enacted.state;
 
     // 3b. Quests: any whose definition of done now holds are completed and pay out their rewards; then any
     //     that can now start (perhaps because another finished) begin, restoring drive.
@@ -283,6 +362,11 @@ export class SessionController {
             },
           });
 
+    // 4b. Who the player is talking with: whoever replied stays in the conversation for a few actions.
+    this.actions++;
+    this.speaker = narrated.find((line) => line.kind === "npc")?.npcId;
+    if (this.speaker) this.spoke.set(this.speaker, this.actions);
+
     // 5. Learn names: anyone named aloud in what the player just heard is now known to them.
     const reply = narrated.find((line) => line.kind === "npc")?.text;
     const named = world.namesHeard(reply ? [reply] : [], next);
@@ -302,7 +386,7 @@ export class SessionController {
 
     // 7. NPC exchange: between turns, NPCs who meet may pass on what they know.
     const exchanged = turnEnded
-      ? await this.exchange(next, [...this.memories, ...witnessed])
+      ? await this.exchange(next, [...this.memories, ...witnessed, ...enacted.memories], enacted.talks)
       : { memories: [], lines: [] };
 
     // 7b. Complications: partial successes catch up with the player. Someone who was fooled sees through it
@@ -310,7 +394,8 @@ export class SessionController {
     const surfacing = await this.complications(next, turnEnded);
     next = world.apply(next, surfacing.events);
     const events = [...resolved.events, ...completions, ...surfacing.events];
-    const formed = [...witnessed, ...exchanged.memories, ...surfacing.memories];
+    const formed = [...witnessed, ...enacted.memories, ...exchanged.memories, ...surfacing.memories];
+    this.tell(npc && intent.kind === "talk" && reply ? { npc: npc.id, said: intent.message, reply } : undefined, formed);
 
     // 8. Present: NPCs whose routines bring them into or out of view are announced, so nobody appears from
     //    nowhere, and everyone is shown as the player knows them.
@@ -320,7 +405,7 @@ export class SessionController {
       ...(drive ? [drive] : []),
       ...(pushed ? [{ kind: "system" as const, text: `(You push yourself. Drive left: ${next.drive}.)` }] : []),
       ...presentToPlayer(
-        [...narrated, ...surfacing.lines, ...movements, ...exchanged.lines],
+        [...narrated, ...surfacing.lines, ...enacted.lines, ...movements, ...exchanged.lines],
         [...world.world.npcs.values()],
         next.knownNpcs,
       ),
@@ -330,12 +415,37 @@ export class SessionController {
       ...(turnEnded ? [{ kind: "system" as const, text: `— Turn ${next.turn} —` }] : []),
     ];
 
-    // 9. Persist the new state, its turn record and new memories together.
+    // 9. Persist the new state, its turn record and new memories together. The place is remembered as the
+    //    player leaves it, so coming back tells only what's changed.
+    next = world.snapshot(next);
     await store.commitTurn(next, { turn: next.turn, input, intent, events, output: lines }, formed);
     this.state = next;
     this.memories.push(...formed);
     this.keepRecent([{ kind: "player", text: input }, ...lines]);
+    // 10. The NPCs start deciding what to do with the new turn.
+    if (turnEnded) this.plan();
     return lines;
+  }
+
+  /**
+   * Tells onActivity what passed between minds this action: what the player and an NPC said to each other,
+   * what NPCs told one another, and what they saw the player or each other do.
+   */
+  private tell(talk: { npc: string; said: string; reply: string } | undefined, memories: NpcMemory[]): void {
+    const { onActivity } = this.deps;
+    if (!onActivity) return;
+    const npcs = this.deps.world.world.npcs;
+    if (talk) {
+      onActivity({ type: "message", from: "player", to: talk.npc, kind: "said", text: talk.said });
+      onActivity({ type: "message", from: talk.npc, to: "player", kind: "said", text: talk.reply });
+    }
+    for (const m of memories) {
+      if (m.kind === "heard" && m.source) {
+        onActivity({ type: "message", from: m.source.npcId, to: m.npcId, kind: "told", text: m.text });
+      } else if (m.kind === "witnessed" && m.about !== m.npcId && (m.about === "player" || npcs.has(m.about))) {
+        onActivity({ type: "message", from: m.about, to: m.npcId, kind: "seen", text: m.text });
+      }
+    }
   }
 
   /** Complications of earlier partial successes that are due now: see step 7b. */
@@ -391,8 +501,12 @@ export class SessionController {
    * At most one conversation between NPCs per turn, as it starts. The world engine picks who meets and what each may
    * share; the narrative engine picks what they actually say. If the player is there, they see it happen.
    */
-  private async exchange(next: GameState, memories: NpcMemory[]): Promise<{ memories: NpcMemory[]; lines: LogLine[] }> {
-    const candidate = findExchange(this.deps.world, memories, next);
+  private async exchange(
+    next: GameState,
+    memories: NpcMemory[],
+    sought: [string, string][] = [],
+  ): Promise<{ memories: NpcMemory[]; lines: LogLine[] }> {
+    const candidate = findExchange(this.deps.world, memories, next, sought);
     if (!candidate) return { memories: [], lines: [] };
     const labels = { a: npcLabel(candidate.a, next.knownNpcs), b: npcLabel(candidate.b, next.knownNpcs) };
     let choice;
@@ -407,6 +521,36 @@ export class SessionController {
       memories: applyExchange(candidate, choice, next.turn),
       lines: seen ? [{ kind: "narration", text: choice.summary }] : [],
     };
+  }
+
+  /**
+   * Starts the NPCs deciding, in the background, what to do as the current turn ends: one at a time (a local
+   * model answers one call at a time anyway). Someone whose decision fails just carries on as they were.
+   */
+  private plan(): void {
+    if (!this.deps.npcAgents || !this.state) return;
+    const { world, narrative } = this.deps;
+    const state = this.state;
+    const memories = [...this.memories];
+    this.planning = (async () => {
+      const plans: NpcPlan[] = [];
+      for (const npc of deciders(world, state)) {
+        try {
+          const plan = await narrative.plan(situation(world, state, memories, npc));
+          if (plan) plans.push(plan);
+        } catch {
+          // Undecided: they stay where they are, or keep to their routine.
+        }
+      }
+      return plans;
+    })();
+  }
+
+  /** The NPCs' decisions for the turn that's ending, waiting for any still being made. */
+  private async plans(): Promise<NpcPlan[]> {
+    const planning = this.planning;
+    this.planning = undefined;
+    return planning ? await planning : [];
   }
 
   /** Spends experience on a level. Costs no action, so it isn't a turn: nobody sees or narrates it. */
@@ -459,7 +603,7 @@ export class SessionController {
   }
 
   private async begin(character?: Character): Promise<LogLine[]> {
-    const state = this.deps.world.newGame(this.deps.campaignId, character);
+    const state = this.deps.world.snapshot(this.deps.world.newGame(this.deps.campaignId, character));
     const output: LogLine[] = [
       { kind: "narration", text: this.deps.world.world.intro },
       { kind: "narration", text: describeScene(this.deps.world.scene(state)) },
@@ -469,7 +613,10 @@ export class SessionController {
     this.state = state;
     this.recent = [];
     this.memories = [];
+    this.spoke.clear();
+    this.speaker = undefined;
     this.keepRecent(output);
+    this.plan();
     return output;
   }
 

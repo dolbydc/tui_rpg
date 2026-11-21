@@ -14,6 +14,8 @@ export interface WorldDefinition {
   music?: string;
   /** How pictures of its places are drawn ("painterly dark-fantasy concept art, moody"), when they're drawn. */
   artStyle?: string;
+  /** How much its pictures show: "simple" asks for a few bold shapes and little fine detail. */
+  artDetail?: "simple" | "detailed";
   start: StartingState;
   locations: Map<string, LocationDef>;
   npcs: Map<string, NpcDef>;
@@ -196,7 +198,64 @@ export interface GameState {
   locationNotes: Record<string, string[]>;
   /** The NPC the player is talking with, if any. */
   conversation?: Conversation;
+  /** NPCs travelling with the player, by id: wherever the player goes, they go, whatever their routine. */
+  companions?: string[];
+  /**
+   * Where NPCs are who've left their routine, by NPC id: left there by the player, or gone there of their own
+   * accord. They stay until they choose to go elsewhere.
+   */
+  npcPlaces?: Record<string, string>;
+  /** How each place was when the player last saw it, by location id: coming back, only what's changed is told. */
+  seen?: Record<string, PlaceSnapshot>;
 }
+
+/** A place as the player left it. */
+export interface PlaceSnapshot {
+  /** When (in-game seconds since the campaign began). */
+  elapsed: number;
+  items: string[];
+  /** How many of the place's lasting changes there were. */
+  notes: number;
+  /** NPC ids there. */
+  people: string[];
+}
+
+/** What's different about a place the player is back at, since they last saw it. */
+export interface Revisit {
+  /** In-game seconds since they were last here. */
+  ago: number;
+  /** The time of day then. */
+  then: TimeOfDay["phase"];
+  itemsGone: string[];
+  itemsNew: string[];
+  /** Lasting changes since (a fire, a smashed console…). */
+  changes: string[];
+  /** NPCs here now who weren't then, and those who were and have gone. */
+  arrived: NpcDef[];
+  gone: NpcDef[];
+}
+
+/**
+ * What an NPC means to do with the next turn, decided by the language model from their goals, what they
+ * know and where they are. The world engine checks it's still possible when the turn comes.
+ */
+export type NpcPlan = (
+  | { action: "stay" }
+  /** Go somewhere (by location id), a few steps a turn. */
+  | { action: "go"; to: string }
+  /** Go to wherever the player is. */
+  | { action: "seek_player" }
+  /** Talk with someone where they are (an NPC id): they pass on what they know first. */
+  | { action: "talk"; with: string }
+  /** Change the place they're in for good: one sentence of how it's left. */
+  | { action: "change"; change: string }
+  /** A companion leaving the player, to stay here or go somewhere (a location id). */
+  | { action: "leave_player"; to?: string }
+) & {
+  npcId: string;
+  /** What an onlooker sees them do, one short sentence naming them; empty if nothing worth remarking. */
+  doing: string;
+};
 
 export interface Conversation {
   npcId: string;
@@ -204,8 +263,12 @@ export interface Conversation {
   idleActions: number;
 }
 
-/** What NPC routines are timed by: the time elapsed, less however long each NPC has paused; and the turn. */
-export type Clock = Pick<GameState, "turn" | "elapsed" | "routineDelay">;
+/**
+ * Where NPCs are follows from this: their routines are timed by the time elapsed, less however long each has
+ * paused, and the turn; companions are wherever the player is; anyone left somewhere stays there.
+ */
+export type Clock = Pick<GameState, "turn" | "elapsed" | "routineDelay"> &
+  Partial<Pick<GameState, "locationId" | "companions" | "npcPlaces">>;
 
 // --- Turn pipeline -----------------------------------------------------------
 
@@ -217,6 +280,10 @@ export type Intent = (
   | { kind: "take"; items: string[] }
   | { kind: "talk"; npc: string; message: string }
   | { kind: "give"; item: string; npc: string }
+  /** Asking someone here to come along with the player (or bringing them: helping, carrying, escorting). */
+  | { kind: "lead"; npc: string }
+  /** Parting from a companion: they stay here, or go to the place named. */
+  | { kind: "dismiss"; npc: string; to?: string }
   /** Putting something from the inventory down here. */
   | { kind: "drop"; item: string }
   | { kind: "wait" }
@@ -288,6 +355,10 @@ export type WorldEvent =
   /** A hidden item was found: it now lies in plain sight. */
   | { type: "item_found"; item: string; locationId: string }
   | { type: "item_given"; item: string; npcId: string }
+  /** Someone joined the player, and goes wherever they go. */
+  | { type: "joined"; npcId: string }
+  /** A companion parted from the player: they stay at, or go to, the location. */
+  | { type: "parted"; npcId: string; locationId: string }
   | { type: "quest_started"; questId: string }
   | { type: "quest_completed"; questId: string; reward: Reward }
   | { type: "levelled_up"; stat: string; cost: number }
@@ -332,6 +403,10 @@ export interface SceneView {
   location: LocationDef;
   exits: { direction: string; name: string }[];
   npcs: NpcDef[];
+  /** Ids of the NPCs here who are travelling with the player. */
+  companions: string[];
+  /** Set when the player is back somewhere they've seen before: what's different since. */
+  since?: Revisit;
   /** Everyone else, who isn't here: given to the model so it gets them right if they're mentioned. */
   others: NpcDef[];
   /** NPC ids whose names the player knows; everyone else is shown by appearance. */
@@ -380,6 +455,15 @@ export interface LogLine {
 }
 
 /** Something one NPC remembers. Stored per NPC; grows as they witness, talk and hear things. */
+/**
+ * Something one of the game's minds does, for a frontend that shows them at work: an agent asking the language
+ * model something (and getting its answer), or one passing something to another. Agents are "player" (what the
+ * player meant is read from what they typed), "narrator", and each NPC by id.
+ */
+export type Activity =
+  | { type: "thinking"; call: number; agent: string; task: string; phase: "start" | "end" }
+  | { type: "message"; from: string; to: string; kind: "said" | "told" | "seen"; text: string };
+
 export interface NpcMemory {
   id: string;
   npcId: string;

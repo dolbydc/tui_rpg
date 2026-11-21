@@ -44,10 +44,29 @@ export function drawScene(player) {
   if (!place.url) img.removeAttribute("src");
   img.alt = place.name;
   $("scene-name").textContent = place.name;
-  // Portraits of who's here over the picture: those drawn, or on their way.
+  // Whoever the player is talking with stands large over the picture, the one who just replied to the fore.
+  const talking = player.people.filter((p) => p.talking);
+  scene.classList.toggle("talking", talking.length > 0);
+  $("scene-talk").style.setProperty("--talkers", String(Math.max(1, talking.length)));
+  $("scene-talk").replaceChildren(
+    ...talking.map((p) =>
+      el(
+        "figure",
+        ["talker", p.speaking ? "speaking" : "", talking.length > 1 && !p.speaking ? "listening" : ""].filter(Boolean).join(" "),
+        // Cut out of their background if that's been done, so it's them standing here, not where they were drawn.
+        p.cutout
+          ? Object.assign(document.createElement("img"), { className: "cut", src: p.cutout, alt: p.appearance })
+          : p.url
+          ? Object.assign(document.createElement("img"), { src: p.url, alt: p.appearance })
+          : el("div", p.drawing ? "talker-blank drawing" : "talker-blank", p.drawing ? "" : p.label.replace(/^the /i, "").charAt(0).toUpperCase()),
+        el("figcaption", "", p.label),
+      ),
+    ),
+  );
+  // Portraits of everyone else here, small over the picture: those drawn, or on their way.
   $("scene-people").replaceChildren(
     ...player.people
-      .filter((p) => p.url || p.drawing)
+      .filter((p) => !p.talking && (p.url || p.drawing))
       .map((p) => el("li", "", portrait(p), el("span", "name", p.label))),
   );
 }
@@ -104,7 +123,14 @@ function drawCharacter({ character: c, turn, time }) {
 function drawPeople(people) {
   $("people-panel").hidden = people.length === 0;
   $("people").replaceChildren(
-    ...people.map((p) => el("li", "", portrait(p), el("div", "", el("div", "label", p.label), el("div", "appearance", p.appearance)))),
+    ...people.map((p) =>
+      el(
+        "li",
+        "",
+        portrait(p),
+        el("div", "", el("div", "label", p.label, ...(p.companion ? [el("span", "with-you", "with you")] : [])), el("div", "appearance", p.appearance)),
+      ),
+    ),
   );
 }
 

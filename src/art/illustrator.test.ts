@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -15,6 +15,7 @@ import { RemoteGame, serve } from "../engine/protocol.js";
 import { MockProvider } from "../llm/mock.js";
 import { loadWorld } from "../world/loader.js";
 import { ComfyPainter, type Painter } from "./comfy.js";
+import type { Cutter } from "./cutout.js";
 import { Illustrator, imagePrompt, portraitPrompt } from "./illustrator.js";
 
 const world = await loadWorld(DEFAULT_CAMPAIGN_DIR);
@@ -81,6 +82,23 @@ test("a portrait is drawn from how someone looks, never from their persona, know
   assert.doesNotMatch(asked, /Old Pell|Pell/, "not their name");
   for (const fact of pell.knowledge) assert.ok(!asked.includes(fact.fact), "not what they know");
   assert.ok(!asked.includes(pell.persona.slice(0, 40)), "not their persona");
+});
+
+test("a campaign that wants simple pictures asks for short prompts of a few bold shapes", async () => {
+  assert.equal(world.artDetail, "simple", "the Hollow Lantern asks for simple pictures");
+  const asked = async (detail: "simple" | "detailed") => {
+    const llm = new MockProvider(() => JSON.stringify({ prompt: PROMPT }));
+    await imagePrompt(llm, { ...world, artDetail: detail }, square);
+    await portraitPrompt(llm, { ...world, artDetail: detail }, world.npcs.get("old-pell")!);
+    return llm.requests.map((r) => r.messages[0].content);
+  };
+  const [place, portrait] = await asked("simple");
+  assert.match(place, /25-45 words/);
+  assert.match(place, /no fine texture or intricate detail/);
+  assert.match(portrait, /20-40 words/);
+  const [richPlace, richPortrait] = await asked("detailed");
+  assert.match(richPlace, /60-110 words/);
+  assert.match(richPortrait, /50-90 words/);
 });
 
 test("a reply without a usable prompt falls back to the place's own description", async () => {
@@ -280,6 +298,23 @@ test("when pictures can't be drawn, the player is told, and the place stops wait
     assert.equal(events[1].kind === "view" && events[1].view.player?.place.drawing, undefined);
     assert.equal(events[1].kind === "view" && events[1].view.player?.people[0].drawing, undefined);
     assert.equal((await game.submit("/look")).view.player?.place.drawing, undefined, "and nothing more is drawn");
+    await game.close();
+  }));
+
+test("once someone's portrait is drawn it's cut out of its background, and the view brings the cut-out", () =>
+  withDir(async (artDir) => {
+    const config = { contentDir: DEFAULT_CONTENT_DIR, storage: "memory", sqliteFile: "", llm: "mock", ollamaUrl: "", ollamaModel: "", artDir } as const;
+    const cutter: Cutter = { cut: (input, output) => writeFile(output, `cut ${path.basename(input)}`) };
+    const game = await createGame(config, { pictures: true, painter: fakePainter(), cutter });
+    const events: GameEvent[] = [];
+    game.subscribe((e) => events.push(e));
+    await game.open("hollow-lantern", "new");
+    for (const answer of ["Ash", "they", "3 3 2 2", "yes"]) await game.submit(answer);
+    const cutout = path.join(artDir, "hollow-lantern", "people", "old-pell.cutout.png");
+    // The place, the portrait, then the portrait cut out.
+    await waitFor(() => events.some((e) => e.kind === "view" && e.view.player?.people[0].cutout));
+    assert.equal(await readFile(cutout, "utf8"), "cut old-pell.png");
+    assert.equal((await game.submit("/look")).view.player?.people[0].cutout, cutout, "and it stays");
     await game.close();
   }));
 

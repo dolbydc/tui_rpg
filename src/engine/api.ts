@@ -1,12 +1,12 @@
 // The engine's contract with its frontends (the terminal UI, Electron, anything else). Everything here is
 // plain data that survives JSON, so a frontend can drive an engine in the same process (LocalGame) or in
 // another one (RemoteGame, over host.ts). Frontends import from here, not from the engine's internals.
-import type { Character, LogLine, MapView, Quest } from "../domain/types.js";
-import type { PlayerStatus, TurnResult } from "../game/session.js";
+import type { Activity, Character, LogLine, MapView, Quest } from "../domain/types.js";
+import type { Minds, PlayerStatus, TurnResult } from "../game/session.js";
 import type { SaveSummary } from "../storage/store.js";
 
-export type { Character, GridPosition, LogLine, MapCell, MapView, Quest, TimeOfDay } from "../domain/types.js";
-export type { PlayerStatus, TurnResult } from "../game/session.js";
+export type { Activity, Character, GridPosition, LogLine, MapCell, MapView, Quest, TimeOfDay } from "../domain/types.js";
+export type { Minds, PlayerStatus, TurnResult } from "../game/session.js";
 export type { SaveSummary } from "../storage/store.js";
 
 /** A campaign on offer at the start menu. */
@@ -33,8 +33,16 @@ export interface PersonView {
   known: boolean;
   /** A picture of them (an absolute file path): the campaign's, or a portrait drawn. */
   image?: string;
+  /** Travelling with the player. */
+  companion?: boolean;
   /** A portrait of them is on its way (an event will bring the view with it). */
   drawing?: boolean;
+  /** Their portrait cut out of its background (a transparent PNG), to show over wherever they are now. */
+  cutout?: string;
+  /** The player is talking with them (in conversation, or spoke with them in the last few actions). */
+  talking?: boolean;
+  /** They're the one who just replied. */
+  speaking?: boolean;
 }
 
 /** What the player can see and knows of their game: nothing the world keeps hidden from them. */
@@ -57,6 +65,11 @@ export interface GameView {
   player?: PlayerView;
   /** The mood music where the player is (an absolute file path); undefined for silence. */
   music?: string;
+  /**
+   * Behind the scenes, only for a frontend that asked to show the game's minds at work (createGame's `minds`):
+   * every NPC by name, wherever they are, and who's had to do with whom. None of it is what the player knows.
+   */
+  minds?: Minds;
 }
 
 /** Who reads what aloud, for frontends that speak: the narrator's voice, and each NPC's. */
@@ -85,7 +98,11 @@ export interface TurnOutcome extends TurnResult {
  * Something the engine says between turns: the game has changed by itself (a picture of the place has been
  * drawn), or there's something the player should be told (pictures can't be drawn).
  */
-export type GameEvent = { kind: "view"; view: GameView } | { kind: "notice"; text: string };
+export type GameEvent =
+  | { kind: "view"; view: GameView }
+  | { kind: "notice"; text: string }
+  /** One of the game's minds at work (see Activity). */
+  | { kind: "activity"; activity: Activity };
 
 /**
  * A game engine, as a frontend drives it: pick a campaign, then send what the player types. One campaign is

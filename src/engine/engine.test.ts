@@ -108,3 +108,19 @@ test("pictures of places and people are found from the campaign folder, and show
     await rm(content, { recursive: true });
   }
 });
+
+test("a frontend that asks for the minds gets them in each view, and hears them at work as events", async () => {
+  const game = await createGame(
+    { contentDir: DEFAULT_CONTENT_DIR, storage: "memory", sqliteFile: "", llm: "mock", ollamaUrl: "", ollamaModel: "" },
+    { minds: true },
+  );
+  const heard: string[] = [];
+  game.subscribe((event) => {
+    if (event.kind === "activity" && event.activity.type === "thinking") heard.push(`${event.activity.agent} ${event.activity.phase}`);
+  });
+  const begun = await play(game);
+  assert.deepEqual(begun.view.minds?.agents.map((a) => a.id).sort(), ["marta", "old-pell"]);
+  await game.submit("look about for a while");
+  assert.deepEqual(heard.slice(0, 4), ["player start", "player end", "narrator start", "narrator end"]);
+  await game.close();
+});

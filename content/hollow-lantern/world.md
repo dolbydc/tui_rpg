@@ -4,7 +4,9 @@ start: village-square
 # The intro is set at night: "Tonight it finally lets up".
 start_time: "20:00"
 # How pictures of its places are drawn, in a frontend that draws them (the Electron window, with ComfyUI).
-art_style: "Painterly dark-fantasy concept art: moody, rich textures, soft volumetric light, muted earthy colours with warm lamplight."
+art_style: "1980s fantasy cartoon, simple flat colours, bold clean outlines, minimal detail, uncluttered composition, soft painted backgrounds; moody, muted earthy colours with warm lamplight."
+# "simple" keeps pictures to a few bold shapes; leave it out (or "detailed") for richly detailed ones.
+art_detail: simple
 # Kokoro text-to-speech voice for narration (see README for the list).
 narrator_voice: bm_george
 character:

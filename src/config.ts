@@ -1,5 +1,6 @@
 import path from "node:path";
 import { COMFY_MODELS, type ComfyModel } from "./art/comfy.js";
+import { DEFAULT_CUTOUT_MODEL } from "./art/cutout.js";
 import { PLAYERS, type PlayerName } from "./voice/players.js";
 
 /** Where campaigns live, one folder each. */
@@ -33,6 +34,10 @@ export interface Config {
   comfyModel: ComfyModel;
   /** Where drawn pictures are kept. */
   artDir: string;
+  /** NPCs decide what to do each turn with the language model ("on"), or only follow their routines ("off"). */
+  npcAgents: "on" | "off";
+  /** The background-removal model portraits are cut out with (a Hugging Face id), or "off". */
+  cutoutModel: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -50,6 +55,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ...(env.TUI_RPG_COMFY_URL && { comfyUrl: env.TUI_RPG_COMFY_URL }),
     comfyModel: oneOf(env.TUI_RPG_COMFY_MODEL, COMFY_MODELS, "TUI_RPG_COMFY_MODEL"),
     artDir: env.TUI_RPG_ART_DIR ?? DEFAULT_ART_DIR,
+    npcAgents: oneOf(env.TUI_RPG_NPC_AGENTS, ["on", "off"], "TUI_RPG_NPC_AGENTS"),
+    cutoutModel: env.TUI_RPG_CUTOUT_MODEL || DEFAULT_CUTOUT_MODEL,
   };
 }
 

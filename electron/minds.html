@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src file: data:; font-src file: data:"
+    />
+    <title>Minds · TUI RPG</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <!-- Behind the scenes, in a window of its own beside the game's: the player, the narrator and the NPCs, the
+       language model they think with, and what passes between them as it happens. -->
+  <body class="minds-window">
+    <div class="minds-sheet">
+      <h2>Minds <span class="muted">· behind the scenes</span></h2>
+      <div class="minds-body">
+        <svg id="minds-graph" viewBox="0 0 900 660" role="img" aria-label="The game's minds and what passes between them"></svg>
+        <div class="minds-side">
+          <div class="minds-legend">
+            <span><i class="said"></i>said</span><span><i class="told"></i>told (gossip)</span><span><i class="seen"></i>seen</span><span><i class="think"></i>thinking</span>
+          </div>
+          <ol id="minds-log"></ol>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="minds-page.js"></script>
+  </body>
+</html>

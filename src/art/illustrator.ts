@@ -139,9 +139,13 @@ export function imagePrompt(llm: LlmProvider, world: WorldDefinition, location: 
     llm,
     world,
     "You write prompts for a text-to-image model that illustrates places in a text adventure.\n" +
-      "The prompt is one paragraph of 60-110 words in plain visual language: the setting; what is in the foreground, " +
-      "middle and background; the light sources and their colour; the time of day and the weather; the mood. Describe " +
-      "only what can be seen there. No people or creatures, no names, no story, no text, signs or lettering.",
+      (world.artDetail === "simple"
+        ? "The prompt is one short paragraph of 25-45 words in plain visual language: the setting, its two or three " +
+          "biggest shapes, the main light and the mood. Keep it simple and uncluttered: broad shapes, no small objects, " +
+          "no fine texture or intricate detail. "
+        : "The prompt is one paragraph of 60-110 words in plain visual language: the setting; what is in the foreground, " +
+          "middle and background; the light sources and their colour; the time of day and the weather; the mood. ") +
+      "Describe only what can be seen there. No people or creatures, no names, no story, no text, signs or lettering.",
     `The place: ${location.name}\n${location.description}`,
     `${location.name}. ${location.description}`,
     signal,
@@ -157,11 +161,18 @@ export function portraitPrompt(llm: LlmProvider, world: WorldDefinition, npc: Np
     llm,
     world,
     "You write prompts for a text-to-image model that paints character portraits for a text adventure.\n" +
-      "The prompt is one paragraph of 50-90 words in plain visual language: a head-and-shoulders portrait of one person " +
-      "facing the viewer; their age, build, face, hair, expression and clothes; the light on them; a plain, softly lit, " +
-      "dark background suited to the setting. Only what can be seen: no names, no story, no other people, no text or lettering.",
+      (world.artDetail === "simple"
+        ? "The prompt is one short paragraph of 20-40 words in plain visual language: a head-and-shoulders portrait of one " +
+          "person facing the viewer; their age, face, hair, expression and the main colours of their clothes; a plain, empty, " +
+          "flat grey background. Keep it simple: bold shapes, no fine texture or intricate detail. "
+        : "The prompt is one paragraph of 50-90 words in plain visual language: a head-and-shoulders portrait of one person " +
+          "facing the viewer; their age, build, face, hair, expression and clothes; soft, even light on them; a plain, " +
+          "empty, flat grey background. ") +
+      // They're cut out and shown over wherever they are now, which a room or landscape behind them would contradict.
+      "Nothing behind them: no room, no scenery, no props. Only what can be seen: no names, no story, no other people, " +
+      "no text or lettering.",
     `The person (${npc.pronouns}): ${npc.appearance}`,
-    `Head-and-shoulders portrait of ${npc.appearance}, facing the viewer, plain dark background`,
+    `Head-and-shoulders portrait of ${npc.appearance}, facing the viewer, plain empty grey background`,
     signal,
   );
 }
